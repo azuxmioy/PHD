@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+.installed.cfg
+*.egg
+build/
+dist/
+
+# macOS
+.DS_Store
+._*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Project artifacts
+*.pdf
+*.mp4
+*.h5
+checkpoints/
+!checkpoints/.gitkeep
+outputs/
+runs/
+logs/
+wandb/
+
+# Large model weights (provide via HuggingFace)
+*.pth
+*.safetensors
+*.bin
+*.ckpt
+!demo_data/**/*.pth
+
+# Body models (require license, distributed separately)
+phd/data/body_models/
+body_models/
+smpl_models/
+!body_models/.gitkeep
+
+# Local experiment dumps (top-level only — don't exclude demo_data/single/)
+/fitting/
+/single/
+eval_results.txt
+
+# Backup copies of the experimental source (kept locally, not for the public repo)
+PoseDiT-pc/
+release_code/
+

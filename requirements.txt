@@ -1,0 +1,32 @@
+# Core
+torch>=2.0,<2.5
+torchvision
+numpy==1.23.1
+scipy==1.10.1
+opencv-python==4.10.0.84
+Pillow==9.4.0
+matplotlib==3.7.5
+h5py==3.11.0
+PyYAML==6.0.2
+tqdm==4.67.1
+trimesh
+
+# Diffusion / model loading
+diffusers==0.32.1
+huggingface-hub==0.26.5
+safetensors==0.4.5
+transformers
+accelerate
+
+# SMPL body model
+smplx==0.1.28
+chumpy==0.70
+
+# Rendering
+pyrender==0.1.45
+PyOpenGL==3.1.0
+
+# Misc
+joblib==1.4.2
+tensorboard==2.14.0
+imageio==2.35.1

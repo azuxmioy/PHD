@@ -1,0 +1,48 @@
+global:
+  # Optional pretrained PointDiT to resume from (HuggingFace ID or local path).
+  # Leave empty to train from scratch.
+  pretrained_model_name_or_path: ''
+  output_dir: './checkpoints'
+  exp_name: 'pointdit_bedlam'
+  seed: 2434
+
+dataset:
+  # Path to BEDLAM H5 shards used for training.
+  train_data_dir: './data/bedlam_h5'
+  # Path to EMDB or equivalent benchmark used for validation.
+  test_data_dir: './data/emdb'
+  dataloader_num_workers: 16
+  resolution: 256
+  sample_random_views: False
+  white_background: False
+  use_heatmap: True
+  use_vertices: True
+
+training:
+  # Per-GPU batch size. Paper uses 64 across 8 GPUs (effective 512).
+  train_batch_size: 64
+  num_train_epochs: 1000
+  checkpointing_steps: 3000
+
+validation:
+  validation: True
+  test: True
+  num_gen_images: 4
+  num_validation_images: 8
+  validation_steps: 500
+  test_steps: 1000
+
+network:
+  # Classifier-free guidance dropout for image + shape conditioning.
+  drop_prob: 0.05
+  guidance_scale: 2.0
+  conditioning_scale: 1.0
+  conditioning_channels: 4
+
+optimizer:
+  # Stage 1: 1e-5. Stage 2 (finetune): 5e-7. See README for two-stage schedule.
+  lr: 0.00001
+  lr_controlnet: 0.00001
+
+misc:
+  report_to: 'tensorboard'
