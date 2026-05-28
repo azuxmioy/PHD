@@ -40,10 +40,6 @@ ZERO_BETAS = torch.zeros([1, 10]).to(device)
 MALE_BETAS = torch.tensor([0.8035, -0.0128, -0.2287, 0.5410, -0.1599, 0.0293, 0.2776, -0.0047, -0.2494, -0.0204]).view(1, -1)
 FEMALE_BETAS = torch.tensor([-0.6495, 0.0103, 0.1850, -0.4372, 0.1287, -0.0242, -0.2246, 0.0030, 0.2028, 0.0173]).view(1, -1)
 
-#TARGET_HEIGHT = [1.75, 1.75, 1.75, 1.75, 1.75, 1.65, 1.65, 1.65, 1.65, 1.65]
-TARGET_HEIGHT = [1.77, 1.70, 1.80, 1.80, 1.80, 1.68, 1.64, 1.64, 1.64, 1.62]
-TARGET_MASS = [60, 65, 90, 90, 80, 60, 60, 60, 55, 60]
-USE_FEMALE = [5, 6, 7, 8, 9]
 
 def fit_betas(init_pose, init_betas, init_cam, openpose_joints, J_0, shoulder_width, target_height, target_mass):
 
@@ -227,86 +223,87 @@ def _prepare_template_data(betas, pose_type='T', leg_close=False):
 # Orient - Pitch unknown, yaw, roll - small LR
 # Camera - Detph unknown shounder / 2, X, Y pelvis aligned - small LR
 
-#'/Users/hohs/Desktop/emdb/data/P0/01_mvs_b/P0_01_mvs_b_data.pkl'
 def main():
+    """SHAPify: estimate personal SMPL betas from T-pose images using body measurements.
 
+    Reads a subjects.json file describing each subject:
+        [
+            {"image": "subject0.jpg", "pose": "subject0_keypoints.json",
+             "height": 1.77, "weight": 60, "gender": "male"},
+            ...
+        ]
+    Image + pose paths are resolved relative to --input_dir.
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--subjects', type=str, required=True,
+                        help='Path to subjects.json describing each subject.')
+    parser.add_argument('--input_dir', type=str, default='input',
+                        help='Folder containing the image and pose files referenced in subjects.json.')
+    parser.add_argument('--output_dir', type=str, default='fit_shape_final')
+    parser.add_argument('--width', type=int, default=WIDTH, help='Image width in pixels.')
+    parser.add_argument('--height', type=int, default=HEIGHT, help='Image height in pixels.')
+    parser.add_argument('--focal', type=float, default=focal, help='Camera focal length in pixels.')
+    args = parser.parse_args()
 
-#0.03018393, -2.69502442,  0.10596466
+    os.makedirs(args.output_dir, exist_ok=True)
+    with open(args.subjects, 'r') as f:
+        subjects = json.load(f)
 
-#  [-0.80447755,  0.01197245,  0.59386239,  1.91859893],
-#  [-0.07017248, -0.994711  , -0.07500568, -0.16480312],
-#  [ 0.58982345, -0.10201318,  0.8010628 ,  3.00308193],
-    out_path = 'fit_shape_final'
-    os.makedirs(out_path, exist_ok=True)
+    for subject in subjects:
+        im = subject['image']
+        po = subject['pose']
+        target_h = subject['height']
+        target_w = subject['weight']
+        gender = subject.get('gender', 'neutral').lower()
 
-    
-    pose_list = [x for x in sorted(os.listdir('input/pose/')) if x.endswith('json')]
-    img_list = [x for x in sorted(os.listdir('input/image/')) if x.endswith('jpg')]
-
-    for i, (im, po) in enumerate(zip(img_list, pose_list)):
-
-        pose = json.load(open('input/pose/' + po, 'r'))['people'][0]['pose_keypoints_2d']
+        pose = json.load(open(os.path.join(args.input_dir, po), 'r'))['people'][0]['pose_keypoints_2d']
         np_pose = np.reshape(np.array(pose), (-1, 3))
 
         pelvis = np_pose[8, :2]
-        print(pelvis)
         shoulder_width = np.sqrt(np.sum((np_pose[2, :2] - np_pose[5, :2]) ** 2))
-        print(shoulder_width)
 
-        offset_x = (pelvis[0] - WIDTH / 2) / 1436.4
-        offset_y = (pelvis[1] - HEIGHT / 2) / 1436.4
-    
-        print(offset_x, offset_y)
+        offset_x = (pelvis[0] - args.width / 2) / args.focal
+        offset_y = (pelvis[1] - args.height / 2) / args.focal
 
-        if i in USE_FEMALE:
-            init_betas = ZERO_BETAS
-        else:
+        if gender.startswith('f'):
+            init_betas = FEMALE_BETAS
+        elif gender.startswith('m'):
             init_betas = MALE_BETAS
+        else:
+            init_betas = ZERO_BETAS
 
         I_pose_mesh, J_0, smpl_shoulder, template_pose = _prepare_template_data(init_betas, 'T')
-        offset_z = smpl_shoulder * 1436.4 /shoulder_width
-
-        #smpl_cam = trimesh.Trimesh(I_pose_mesh.detach().cpu().numpy(), body_model.faces, process=False)
-        #smpl_cam.export('i_pose.obj')
+        offset_z = smpl_shoulder * args.focal / shoulder_width
 
         cam_init = torch.tensor([offset_x * offset_z, offset_y * offset_z, offset_z]).unsqueeze(0).float()
         pose_init = template_pose
 
-        new_out = fit_betas(pose_init, init_betas, cam_init, np_pose, J_0, shoulder_width, TARGET_HEIGHT[i], TARGET_MASS[i])
-
-
-    #point_2d = perspective_projection(
-        #points= (I_pose_mesh-J_0).unsqueeze(0),
-        #translation= torch.tensor([offset_x * offset_z, offset_y * offset_z, offset_z]).unsqueeze(0).float(),
-        #focal_length= torch.tensor([1436.4, 1436.4]).unsqueeze(0),
-        #camera_center= torch.tensor([WIDTH / 2, HEIGHT / 2]).unsqueeze(0)
-    #)
+        new_out = fit_betas(pose_init, init_betas, cam_init, np_pose, J_0,
+                            shoulder_width, target_h, target_w)
 
         point_2d = perspective_projection(
             points=new_out['pred_vertices'],
             translation=new_out['pred_cam'],
-            focal_length= torch.tensor([1436.4, 1436.4]).unsqueeze(0),
-            camera_center= torch.tensor([WIDTH / 2, HEIGHT / 2]).unsqueeze(0)
+            focal_length=torch.tensor([args.focal, args.focal]).unsqueeze(0),
+            camera_center=torch.tensor([args.width / 2, args.height / 2]).unsqueeze(0),
         )
-        img = cv2.imread(os.path.join('input/image',im))
+        img = cv2.imread(os.path.join(args.input_dir, im))
         canvus = img.copy()
         for v in point_2d[0]:
             cv2.circle(canvus, (int(v[0]), int(v[1])), 1, (255, 0, 0), -1)
+        cv2.imwrite(os.path.join(args.output_dir, 'opt_' + im + '.jpg'), canvus)
 
-        cv2.imwrite(os.path.join(out_path, 'opt_'+ im + '.jpg'), canvus)
+        smpl_cam = trimesh.Trimesh(new_out['pred_vertices'][0].detach().cpu().numpy(),
+                                   body_model.faces, process=False)
+        smpl_cam.export(os.path.join(args.output_dir, 'opt_mesh_' + im + '.obj'))
 
-        smpl_cam = trimesh.Trimesh(new_out['pred_vertices'][0].detach().cpu().numpy(), body_model.faces, process=False)
-        smpl_cam.export(os.path.join(out_path, 'opt_mesh_'+ im + '.obj'))
+        shape_output = body_model(betas=new_out['smpl']['betas'])
+        smpl_cam = trimesh.Trimesh(shape_output.vertices[0].detach().cpu().numpy(),
+                                   body_model.faces, process=False)
+        smpl_cam.export(os.path.join(args.output_dir, 'pred_shape' + im + '.obj'))
+        np.save(os.path.join(args.output_dir, 'neutral_shape' + im + '.npy'),
+                new_out['smpl']['betas'][0].detach().cpu().numpy())
 
-        print(new_out['smpl']['betas'])
-        print(new_out['smpl']['global_orient'])
-
-        shape_output = body_model(
-                       betas=new_out['smpl']['betas'],
-                       )
-        smpl_cam = trimesh.Trimesh(shape_output.vertices[0].detach().cpu().numpy(), body_model.faces, process=False)
-        smpl_cam.export(os.path.join(out_path, 'pred_shape'+ im + '.obj'))
-        np.save(os.path.join(out_path, 'neutral_shape'+ im + '.npy'), new_out['smpl']['betas'][0].detach().cpu().numpy())
 
 if __name__ == '__main__':
     main()

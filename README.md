@@ -84,12 +84,18 @@ demo_data/single/
 `shapify/fit_shape_wild.py` works without measurements.
 
 ```bash
+# With body measurements (best accuracy)
+SMPL_MODEL_PATH=body_models/smpl \
+python -m shapify.fit_shape \
+    --subjects demo_data/subjects_example.json \
+    --input_dir my_subjects/ \
+    --output_dir guess_shape/
+
+# Without measurements
 SMPL_MODEL_PATH=body_models/smpl python -m shapify.fit_shape_wild
 ```
 
-The script reads `input/image/*.jpg` and `input/pose/*.json` and writes
-`fit_shape_final/neutral_shape*.npy` — a 10-dim β vector per subject.
-Feed this β into the body fitter via the `params/*.pkl` file.
+`subjects.json` is a list of `{image, pose, height, weight, gender}` entries (see [demo_data/subjects_example.json](demo_data/subjects_example.json)). Image and OpenPose JSON paths are resolved relative to `--input_dir`. Output is `neutral_shape<image>.npy` — a 10-dim β vector per subject. Feed this β into the body fitter via the per-image `params/*.pkl`.
 
 ## EMDB evaluation
 
