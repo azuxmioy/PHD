@@ -33,17 +33,23 @@ JOINT_WEIGHTS = torch.tensor([[1.0, 0.1, 1.0, 1.0, 5.0,
                  1.0, 1.0, 5.0, 0.5, 0.1,
                  0.5, 0.75, 0.1, 0.5, 0.75,
                  1.0, 1.0, 1.0, 1.0, 0.5,
-                 0.5, 0.5, 0.5, 0.5, 0.5]])
+                 0.5, 0.5, 0.5, 0.5, 0.5]]).to(device)
 
 
 ZERO_BETAS = torch.zeros([1, 10]).to(device)
-MALE_BETAS = torch.tensor([0.8035, -0.0128, -0.2287, 0.5410, -0.1599, 0.0293, 0.2776, -0.0047, -0.2494, -0.0204]).view(1, -1)
-FEMALE_BETAS = torch.tensor([-0.6495, 0.0103, 0.1850, -0.4372, 0.1287, -0.0242, -0.2246, 0.0030, 0.2028, 0.0173]).view(1, -1)
+MALE_BETAS = torch.tensor([0.8035, -0.0128, -0.2287, 0.5410, -0.1599, 0.0293, 0.2776, -0.0047, -0.2494, -0.0204]).view(1, -1).to(device)
+FEMALE_BETAS = torch.tensor([-0.6495, 0.0103, 0.1850, -0.4372, 0.1287, -0.0242, -0.2246, 0.0030, 0.2028, 0.0173]).view(1, -1).to(device)
 
 
-def fit_betas(init_pose, init_betas, init_cam, openpose_joints, J_0, shoulder_width, target_height, target_mass):
+def fit_betas(init_pose, init_betas, init_cam, openpose_joints, J_0, shoulder_width, target_height, target_mass,
+              focal_length=None, image_width=None, image_height=None):
 
-    #gt_shape = gt_shape
+    if focal_length is None:
+        focal_length = focal
+    if image_width is None:
+        image_width = WIDTH
+    if image_height is None:
+        image_height = HEIGHT
 
     opt_pitch = init_pose[:, :1].clone().detach().contiguous().requires_grad_(True)
     opt_yaw = init_pose[:, 1:2].clone().detach().contiguous().requires_grad_(True)
@@ -89,7 +95,7 @@ def fit_betas(init_pose, init_betas, init_cam, openpose_joints, J_0, shoulder_wi
 
     loop_smpl = tqdm(range(OPT_ITER))
 
-    gt_joints_2d = torch.from_numpy(openpose_joints).view(1, -1, 3).detach()
+    gt_joints_2d = torch.from_numpy(openpose_joints).view(1, -1, 3).detach().float().to(device)
 
     gt_body_kps = gt_joints_2d [..., :2]
     conf_body_kps = gt_joints_2d[..., 2:]
@@ -112,8 +118,8 @@ def fit_betas(init_pose, init_betas, init_cam, openpose_joints, J_0, shoulder_wi
         pred_point_2d = perspective_projection(
                 points = centered_joints_3d,
                 translation= cam_pos,
-                focal_length= torch.tensor([1436.4, 1436.4]).unsqueeze(0),
-                camera_center= torch.tensor([WIDTH / 2, HEIGHT / 2]).unsqueeze(0)
+                focal_length= torch.tensor([focal_length, focal_length], device=device).unsqueeze(0),
+                camera_center= torch.tensor([image_width / 2, image_height / 2], device=device).unsqueeze(0)
         )
 
 
@@ -181,7 +187,7 @@ def fit_betas(init_pose, init_betas, init_cam, openpose_joints, J_0, shoulder_wi
 
 def _prepare_template_data(betas, pose_type='T', leg_close=False):
 
-    body_pose_t = torch.zeros((1, 69))
+    body_pose_t = torch.zeros((1, 69), device=device)
     cam_orient_aa = np.array([0.03018393, -2.69502442,  0.10596466])
     cam_R = np.array([[-0.80447755,  0.01197245,  0.59386239],
                   [-0.07017248, -0.994711  , -0.07500568],
@@ -192,15 +198,15 @@ def _prepare_template_data(betas, pose_type='T', leg_close=False):
     #cam_aa, _ = cv2.Rodrigues(cam_R @ rot_mat)
 
     if pose_type=='I':
-        body_pose_t[:, 45:51] = torch.tensor([-0.13, 0, -1.48, -0.13, 0 , 1.48])
+        body_pose_t[:, 45:51] = torch.tensor([-0.13, 0, -1.48, -0.13, 0 , 1.48], device=device)
 
     if leg_close:
-        body_pose_t[:, 0:6] = torch.tensor([0, 0, -0.05, 0, 0, 0.05])
-        body_pose_t[:, 9:15] = torch.tensor([0, 0, -0.05, 0, 0, 0.05])
+        body_pose_t[:, 0:6] = torch.tensor([0, 0, -0.05, 0, 0, 0.05], device=device)
+        body_pose_t[:, 9:15] = torch.tensor([0, 0, -0.05, 0, 0, 0.05], device=device)
 
     #orient_cam = torch.tensor(cam_aa).view(-1, 3).float()
 
-    orient_cam = torch.tensor([-2.9, 0, 0]).view(-1, 3).float()
+    orient_cam = torch.tensor([-2.9, 0, 0], device=device).view(-1, 3).float()
 
     smpl_outputs = body_model(
                        global_orient = orient_cam,
@@ -275,17 +281,20 @@ def main():
         I_pose_mesh, J_0, smpl_shoulder, template_pose = _prepare_template_data(init_betas, 'T')
         offset_z = smpl_shoulder * args.focal / shoulder_width
 
-        cam_init = torch.tensor([offset_x * offset_z, offset_y * offset_z, offset_z]).unsqueeze(0).float()
+        cam_init = torch.tensor([offset_x * offset_z, offset_y * offset_z, offset_z], device=device).unsqueeze(0).float()
         pose_init = template_pose
 
         new_out = fit_betas(pose_init, init_betas, cam_init, np_pose, J_0,
-                            shoulder_width, target_h, target_w)
+                            shoulder_width, target_h, target_w,
+                            focal_length=args.focal,
+                            image_width=args.width,
+                            image_height=args.height)
 
         point_2d = perspective_projection(
             points=new_out['pred_vertices'],
             translation=new_out['pred_cam'],
-            focal_length=torch.tensor([args.focal, args.focal]).unsqueeze(0),
-            camera_center=torch.tensor([args.width / 2, args.height / 2]).unsqueeze(0),
+            focal_length=torch.tensor([args.focal, args.focal], device=device).unsqueeze(0),
+            camera_center=torch.tensor([args.width / 2, args.height / 2], device=device).unsqueeze(0),
         )
         img = cv2.imread(os.path.join(args.input_dir, im))
         canvus = img.copy()
