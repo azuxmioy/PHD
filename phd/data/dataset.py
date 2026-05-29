@@ -180,7 +180,8 @@ class TrainDiffDataset(Dataset):
         self.dataset_path = args.train_data_dir
         self._init_dataset(self.dataset_path)
 
-        with open('mean_points.pkl', 'rb') as f:
+        from phd.paths import MEAN_POINTS_PATH
+        with open(MEAN_POINTS_PATH, 'rb') as f:
             data_dict = pickle.load(f)
         self.mean_points = torch.from_numpy(data_dict['mean']).float()
         self.std_points = torch.from_numpy( data_dict['std']).float()
@@ -212,22 +213,46 @@ class TrainDiffDataset(Dataset):
     def _init_dataset(self, dataset_path):
         """Initializes the dataset from a h5 file.
            copy smpl_v from h5 file.
-        """
-        #self.h5_lists = [ x for x in sorted(os.listdir(dataset_path)) if os.path.isdir(os.path.join(dataset_path, x))]
-        self.h5_lists = val_splits if self.val else data_splits
 
+        Two layouts are supported:
+          - directory of splits (BEDLAM-style): dataset_path/<split>/anno_smpl.h5
+          - single H5 file: dataset_path may point to a single anno_smpl.h5; or
+            dataset_path is a directory containing exactly the h5 files of each
+            split as `<split>.h5` (used for the smoke-test download).
+        """
         self.data = []
 
-        for i, data_split in enumerate(self.h5_lists):
+        if os.path.isfile(dataset_path) and dataset_path.endswith('.h5'):
+            # Single H5 mode
+            self.dataset_path = os.path.dirname(dataset_path) or '.'
+            self.h5_lists = [os.path.basename(dataset_path)]
+            self._single_h5 = True
+        elif os.path.isdir(dataset_path) and any(
+                f.endswith('.h5') for f in os.listdir(dataset_path)):
+            # Directory of split-named .h5 files
+            self.h5_lists = sorted(
+                f for f in os.listdir(dataset_path) if f.endswith('.h5'))
+            self._single_h5 = True
+        else:
+            # Original layout: directory of subdirs, each with anno_smpl.h5
+            self.h5_lists = val_splits if self.val else data_splits
+            self._single_h5 = False
 
-            with h5py.File(os.path.join(dataset_path, data_split, 'anno_smpl.h5'), "r") as f:
+        for i, data_split in enumerate(self.h5_lists):
+            anno_path = self._anno_path(data_split)
+            with h5py.File(anno_path, "r") as f:
                 try:
                     self.data.extend([(i, j) for j in range(f['betas'].shape[0])])
-                except:
+                except Exception:
                     raise ValueError("[Error] Can't load from h5 dataset %s" % data_split)
-                
+
         self.initialization_mode = "h5"
-        print(len(self.data))
+        print(f"[dataset] {len(self.data)} samples across {len(self.h5_lists)} splits")
+
+    def _anno_path(self, data_split):
+        if getattr(self, '_single_h5', False):
+            return os.path.join(self.dataset_path, data_split)
+        return os.path.join(self.dataset_path, data_split, 'anno_smpl.h5')
 
     def _augment_background(self, image, mask, color, clip=False):
         # Random background
@@ -319,7 +344,7 @@ class TrainDiffDataset(Dataset):
 
         split = self.h5_lists[split_id]
 
-        with h5py.File(os.path.join(self.dataset_path, split, 'anno_smpl.h5'), "r") as f:
+        with h5py.File(self._anno_path(split), "r") as f:
             try:
                 bbox = np.array(f['bbox'][image_id])
                 #ori_kp2d = np.array(f['ori_kps'][image_id])
