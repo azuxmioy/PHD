@@ -310,7 +310,7 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
         'orient_6d': opt_global_orient.detach(),
         'body_pose': avg_per_frame[:, 1:],            # (B, 23, 3, 3)
         'global_orient':  avg_per_frame[:, :1],       # (B,  1, 3, 3)
-        'betas': shape.detach(),
+        'betas': shape.detach().view(batch_size, n_sample, -1)[:, 0],  # (B, beta) — same per sample
         'camera': opt_cam.detach().view(batch_size, n_sample, 3).mean(dim=1),  # (B, 3)
     }
 

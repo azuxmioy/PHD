@@ -19,7 +19,8 @@ phd/                    # python package
 shapify/                # standalone shape estimation
 scripts/                # CLI entry points
 ├── fit_image.py        # single-image / image-folder fitting
-├── fit_emdb.py         # EMDB evaluation
+├── fit_emdb.py         # EMDB evaluation (on-disk layout)
+├── eval_emdb_h5.py     # EMDB evaluation (H5 bundle, batched fitting)
 ├── fit_video.py        # in-the-wild video fitting w/ temporal smoothing
 ├── train.py            # PointDiT training
 ├── train.sh            # accelerate launcher
@@ -138,7 +139,45 @@ SMPL_MODEL_PATH=body_models/smpl python -m shapify.fit_shape_wild
 
 ## EMDB evaluation
 
-Prepare EMDB so each sequence (`P{0..9}/{seq}/`) has the same `rgb/`, `cropped_new/`, `bbox/`, `sapiens_1b/` layout plus a `camerahmr/` folder with CameraHMR initializations. Then:
+Two entry points:
+
+### A. H5 bundle + batched fitting (recommended)
+
+If you have the preprocessed `emdb_eval.h5` (see preprocessing steps below), use `scripts/eval_emdb_h5.py` — it reads everything from one H5 file and processes B frames per `fit_batch` call.
+
+```bash
+python scripts/eval_emdb_h5.py \
+    --h5 /path/to/emdb_eval.h5 \
+    --sequence P1_14_outdoor_climb \
+    --pretrained_model_name_or_path checkpoints/pointdit \
+    --batch_size 32 \
+    --n_sample 4 \
+    --output_dir results/emdb_h5
+```
+
+Outputs `<output_dir>/<sequence>_params.npz` with `global_orient (N,1,3,3)`, `body_pose (N,23,3,3)`, `camera (N,3)`, `betas (N,10)`.
+
+On one A100, with `--batch_size 32 --n_sample 4`, P1/14_outdoor_climb (1284 frames) takes ~17 min (≈0.8 s/frame) vs ≈3 s/frame per-frame.
+
+H5 layout expected (sequences as top-level groups):
+```
+emdb_eval.h5
+└── P1_14_outdoor_climb/
+    ├── K              (3, 3)               # camera intrinsics
+    ├── bbox           (N, 3)               # cx, cy, scale per frame
+    ├── crop           (N,)  jpeg bytes     # 256×256 person crops
+    ├── full_img       (N,)  jpeg bytes     # full-resolution images
+    ├── kp2d           (N, 135, 3)          # OpenPose-135 keypoints
+    ├── camerahmr_init (N, 24, 3, 3)        # initial SMPL rotmats
+    ├── fit_betas      (10,)                # SHAPify-fitted shape
+    ├── gt_betas       (10,)                # GT shape (eval only)
+    ├── gt_pose        (N, 72)              # GT axis-angle pose (eval only)
+    └── vert_cam       (N, 6890, 3)         # GT vertices in camera frame
+```
+
+### B. From-disk layout (legacy)
+
+`scripts/fit_emdb.py` reads the per-frame on-disk layout (`rgb/`, `cropped_new/`, `bbox/`, `sapiens_1b/`, `camerahmr/`):
 
 ```bash
 python scripts/fit_emdb.py \
@@ -147,8 +186,7 @@ python scripts/fit_emdb.py \
     --pretrained_model_name_or_path checkpoints/pointdit
 ```
 
-For temporal smoothing on a single sequence:
-
+Temporal smoothing on a single sequence:
 ```bash
 python scripts/_smoother.py \
     --img_path ./emdb/P1/14_outdoor_climb/images \
@@ -157,6 +195,23 @@ python scripts/_smoother.py \
     --meta_file ./emdb/P1/14_outdoor_climb/P1_14_outdoor_climb_data.pkl \
     --output_path ./emdb/P1/14_outdoor_climb/<exp>_smooth
 ```
+
+### Building `emdb_eval.h5` from raw EMDB
+
+You need raw EMDB plus three external models:
+- **Sapiens-1B** (Meta) — whole-body 2D keypoints. <https://github.com/facebookresearch/sapiens>
+- **CameraHMR** — per-frame SMPL pose initialization. <https://github.com/saiakarsh193/CameraHMR>
+- **SMPL neutral model** (already needed by the body fitter).
+
+Pipeline:
+
+1. **Extract person crops + bbox** — `release_code/emdb_test/extract_bbox.py` reads EMDB's per-frame metadata, generates 256×256 crops, writes `bbox/<n>.json` per frame.
+2. **Run Sapiens-1B 2D keypoints** — `release_code/emdb_test/get_2dkp.py` runs Sapiens on the crops and writes `sapiens_1b/<n>.json` (135-keypoint OpenPose layout).
+3. **Run CameraHMR** — `release_code/emdb_test/get_hmr2init.py` calls CameraHMR per frame and writes `camerahmr/<n>.jpg_out.pkl` (with `global_orient`, `body_pose`, `pred_cam_t`).
+4. **Run SHAPify** — per subject, use `shapify/fit_shape.py` (with body measurements) or `shapify/fit_shape_wild.py` (without) on the first T-pose frame to produce `neutral_shape<P>.jpg.npy` (a 10-d β).
+5. **Pack into H5** — combine into one `emdb_eval.h5` with the structure above. Reference packer: `release_code/emdb_test/pack_emdb_res.py`.
+
+The scripts in `release_code/emdb_test/` are the unfiltered preprocessing code from the paper; they assume specific dataset roots and need path adjustments for your setup.
 
 ## Training PointDiT
 
