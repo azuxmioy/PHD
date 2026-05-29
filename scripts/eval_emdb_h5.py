@@ -198,6 +198,9 @@ def main():
     parser.add_argument('--num_validation_images', type=int, default=1)
     parser.add_argument('--n_sample', type=int, default=4,
                         help='PointDiT samples per input frame; final result averages over n_sample.')
+    parser.add_argument('--per_frame', action='store_true',
+                        help='Use legacy per-frame fitting (B=1) with prev_params chaining. '
+                             'Reproduces the cached run\'s setup; slower but matches paper.')
     parser.add_argument('--use_heatmap', action='store_true', default=True)
     parser.add_argument('--use_vertices', action='store_true', default=True)
     parser.add_argument('--seed', type=int, default=None)
@@ -226,9 +229,13 @@ def main():
 
     all_params = {'global_orient': [], 'body_pose': [], 'camera': [], 'betas': []}
     total = 0
-    for batch in tqdm(list(iter_h5_batches(args.h5, args.sequence, args.batch_size,
+    # In per_frame mode we override batch_size to 1 and chain prev_params between frames.
+    effective_bs = 1 if args.per_frame else args.batch_size
+    prev_params = None
+
+    for batch in tqdm(list(iter_h5_batches(args.h5, args.sequence, effective_bs,
                                             device, args.max_frames)),
-                      desc='batches'):
+                      desc='per_frame' if args.per_frame else 'batches'):
         B = batch['input_tensor'].shape[0]
         # CameraHMR init: row 0 -> global_orient, rows 1..23 -> body_pose.
         global_orient = batch['cam_init'][:, :1]               # (B, 1, 3, 3)
@@ -243,14 +250,6 @@ def main():
         op25 = batch['kp2d'][:, :25].clone()                    # (B, 25, 3)
         cam_offset = find_cam_pos(smpl_J, op25, batch['K'])     # (B, 3)
 
-        # fit_batch expects:
-        #  - data['input_tensor'] (B, 3, 256, 256), data['cond_betas'] (B, beta)
-        #  - init_params with shapes (B, ...)
-        #  - kp_2d: (J, 3) -- single frame per call. For B>1, fit_batch broadcasts to B.
-        # Because fit_batch references kp_2d[..., joint_idx, :2] without a batch dim, we
-        # flatten the batch into kp_2d as (B*J, 3). The optimizer state inside fit_batch
-        # already shapes opt_poses to (B*n_sample, 23, 6) so the batched gradient is
-        # computed correctly when kp_2d is per-frame.
         data = {'input_tensor': batch['input_tensor'], 'cond_betas': batch['cond_betas']}
         init_params = {
             'global_orient': global_orient.contiguous(),
@@ -261,12 +260,16 @@ def main():
         out_params = fit_batch(
             smpl_neutral, fitter, data, args, generator, pipeline,
             init_params,
-            kp_2d=batch['kp2d'],            # (B, 135, 3)
+            kp_2d=batch['kp2d'],            # (B, 135, 3) or (1, 135, 3) in per_frame
             K=batch['K'],
-            bbox=batch['bbox_batch'],       # (B, 3)
-            prev_params=None,
+            bbox=batch['bbox_batch'],       # (B, 3) or (1, 3)
+            prev_params=prev_params,
             keypoint_type='openpose25',
         )
+
+        if args.per_frame:
+            # Carry over for the next frame's smoothness regularization.
+            prev_params = out_params
 
         for k in all_params:
             all_params[k].append(out_params[k].detach().cpu())
