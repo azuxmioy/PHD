@@ -219,7 +219,16 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
         #joints_openpose = (joints_2d + 0.5) * WIDTH + torch.tensor([0, 130], device=joints_2d.device)
         #joints_normalized = joints_openpose[:, opt_idx] / WIDTH
 
-        kp_err = torch.norm(gt_body_kps - pred_body_kps, dim=2, keepdim=True) * conf
+        # Optional GMoF-robust 2D keypoint residual (sigma in image pixels).
+        # When args.gmof_sigma > 0, replace L2 by sigma^2 * d^2 / (sigma^2 + d^2),
+        # downweighting outliers. The smoother in _smoother.py uses sigma=100.
+        gmof_sigma = getattr(args, 'gmof_sigma', 0.0)
+        diff = gt_body_kps - pred_body_kps
+        if gmof_sigma > 0:
+            d2 = (diff ** 2).sum(dim=-1, keepdim=True)
+            kp_err = (gmof_sigma ** 2 * d2 / (gmof_sigma ** 2 + d2)).sqrt() * conf
+        else:
+            kp_err = torch.norm(diff, dim=2, keepdim=True) * conf
         if bbox_scale_per_frame is None:
             kp_loss = kp_err.mean(dim=[0, 1]) / bbox_scale
         else:
@@ -257,6 +266,49 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
                 + ((opt_po_r[1:] - opt_po_r[:-1]) ** 2).sum(dim=-1).mean()
             )
             smooth_loss = smooth_loss + intra_loss * getattr(args, 'smooth_intra_weight', 10.0)
+
+        # ----- Smoother-style 2nd-difference jitter + regularize-to-init
+        # (borrowed from scripts/_smoother.py — usable when fitting >=3 frames
+        # together as a sequence). Each term contributes via args.w_jitter,
+        # args.w_reg_init (default 0 = off).
+        w_jitter = getattr(args, 'w_jitter', 0.0)
+        w_reg_init = getattr(args, 'w_reg_init', 0.0)
+        if (w_jitter > 0 or w_reg_init > 0) and batch_size >= 3:
+            cam_r = opt_cam.view(batch_size, n_sample, 3)              # (B, N, 3)
+            orient_r = opt_global_orient.view(batch_size, n_sample, -1)  # (B, N, 6)
+            pose_r = opt_poses.view(batch_size, n_sample, -1)            # (B, N, 23*6)
+            joints_r = SMPL_J[:, :24].view(batch_size, n_sample, 24, 3)  # (B, N, 24, 3)
+
+            if w_jitter > 0:
+                # 2nd-difference jitter (acceleration) along the B (time) axis.
+                def jitter(x):
+                    return ((x[2:] + x[:-2] - 2 * x[1:-1]) ** 2).sum(dim=-1).mean()
+                # Head/neck (SMPL joints 11, 14) gets 10x weight, as in _smoother.py
+                pose_per_joint = opt_poses.view(batch_size, n_sample, 23, 6)
+                head_jitter = ((pose_per_joint[2:, :, [11, 14]] + pose_per_joint[:-2, :, [11, 14]]
+                                - 2 * pose_per_joint[1:-1, :, [11, 14]]) ** 2).sum(dim=-1).mean()
+                joint_smooth = (joints_r[1:] - joints_r[:-1]).norm(dim=-1).mean()
+                jitter_loss = (
+                    jitter(cam_r) + jitter(orient_r) + jitter(pose_r)
+                    + 10.0 * head_jitter + joint_smooth
+                )
+                smooth_loss = smooth_loss + w_jitter * jitter_loss
+
+            if w_reg_init > 0:
+                # Regularize toward the CameraHMR init (init_params).
+                init_orient_6d = matrix_to_rotation_6d(
+                    init_params['global_orient'].reshape(batch_size, 3, 3)
+                ).view(batch_size, 1, 1, 6)
+                init_pose_6d = matrix_to_rotation_6d(
+                    init_params['body_pose'].reshape(batch_size, 23, 3, 3)
+                ).view(batch_size, 1, 23, 6)
+                orient_r_full = opt_global_orient.view(batch_size, n_sample, 1, 6)
+                pose_r_full = opt_poses.view(batch_size, n_sample, 23, 6)
+                reg_loss = (
+                    (orient_r_full - init_orient_6d.to(orient_r_full)).norm(dim=-1).mean()
+                    + (pose_r_full - init_pose_6d.to(pose_r_full)).norm(dim=-1).mean()
+                )
+                smooth_loss = smooth_loss + w_reg_init * reg_loss
 
         if use_point:
             # extract fitted points for next round of denoising

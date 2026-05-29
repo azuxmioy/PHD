@@ -210,6 +210,18 @@ def main():
     parser.add_argument('--w_smooth', type=float, default=0.0,
                         help='Weight on the smooth_loss term (combines prev_params smoothness '
                              'and intra-batch smoothness if enabled).')
+    # ----- Smoother-style losses integrated into fit_batch (active when
+    # batch_size >= 3 and the corresponding weight > 0).
+    parser.add_argument('--w_jitter', type=float, default=0.0,
+                        help='Weight on 2nd-difference temporal jitter (acceleration) over '
+                             'cam/orient/pose + first-difference 3D-joint smoothness + 10x '
+                             'jitter on head/neck joints. Borrowed from _smoother.py.')
+    parser.add_argument('--w_reg_init', type=float, default=0.0,
+                        help='Weight on regularize-toward-init term (pose + orient deviation '
+                             'from CameraHMR init).')
+    parser.add_argument('--gmof_sigma', type=float, default=0.0,
+                        help='If >0, use GMoF-robust 2D keypoint loss with this sigma (pixels). '
+                             '_smoother.py uses 100. 0 keeps the plain L2 norm.')
     parser.add_argument('--use_heatmap', action='store_true', default=True)
     parser.add_argument('--use_vertices', action='store_true', default=True)
     parser.add_argument('--seed', type=int, default=None)
