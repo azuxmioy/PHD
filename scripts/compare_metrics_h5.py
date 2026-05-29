@@ -47,18 +47,30 @@ def pa_align(S1, S2):
 def eval_seq(pred_verts, gt_verts, J_regressor):
     """pred_verts, gt_verts: (N, 6890, 3), both in camera frame.
 
-    Returns mean MPJPE, PA-MPJPE, MVE, PA-MVE in mm.
+    Returns dict of mean metrics in mm:
+      MPJPE / MVE         -- pelvis-aligned (pose-only, paper Table 8 convention)
+      PA-MPJPE / PA-MVE   -- Procrustes-aligned (pose+scale+rotation invariant)
+      C-MPJPE / C-MVE     -- camera-coordinate, no alignment (absolute pose)
+      Pelvis-Err          -- ||pred_pelvis - gt_pelvis|| in camera frame
     """
     pred_J = np.einsum('jv,nvc->njc', J_regressor, pred_verts)
     gt_J = np.einsum('jv,nvc->njc', J_regressor, gt_verts)
     pred_pelvis = (pred_J[:, 1] + pred_J[:, 2]) / 2.0
     gt_pelvis = (gt_J[:, 1] + gt_J[:, 2]) / 2.0
+
+    # Camera-coordinate (absolute) metrics
+    c_mpjpe = np.linalg.norm(pred_J - gt_J, axis=-1).mean(axis=-1) * 1000.0
+    c_mve = np.linalg.norm(pred_verts - gt_verts, axis=-1).mean(axis=-1) * 1000.0
+    pelvis_err = np.linalg.norm(pred_pelvis - gt_pelvis, axis=-1) * 1000.0
+
+    # Pelvis-aligned (subtract camera translation difference)
     shift = (gt_pelvis - pred_pelvis)[:, None, :]
     pred_J_a = pred_J + shift
     pred_V_a = pred_verts + shift
-
     mpjpe = np.linalg.norm(pred_J_a - gt_J, axis=-1).mean(axis=-1) * 1000.0
     mve = np.linalg.norm(pred_V_a - gt_verts, axis=-1).mean(axis=-1) * 1000.0
+
+    # Procrustes-aligned (scale + R + t)
     pa_mpjpe = np.empty(len(pred_J))
     pa_mve = np.empty(len(pred_J))
     for i in range(len(pred_J)):
@@ -68,7 +80,15 @@ def eval_seq(pred_verts, gt_verts, J_regressor):
         pa_mpjpe[i] = np.linalg.norm(J_hat - gt_J[i], axis=-1).mean() * 1000.0
         pa_mve[i] = np.linalg.norm(V_hat - gt_verts[i], axis=-1).mean() * 1000.0
 
-    return mpjpe.mean(), pa_mpjpe.mean(), mve.mean(), pa_mve.mean()
+    return {
+        'MPJPE': mpjpe.mean(),
+        'PA-MPJPE': pa_mpjpe.mean(),
+        'MVE': mve.mean(),
+        'PA-MVE': pa_mve.mean(),
+        'C-MPJPE': c_mpjpe.mean(),
+        'C-MVE': c_mve.mean(),
+        'Pelvis-Err': pelvis_err.mean(),
+    }
 
 
 def smpl_forward(global_orient, body_pose, betas, camera, smpl_model, device, chunk=64):
@@ -120,9 +140,11 @@ def main():
     smpl_model = smplx.SMPL(model_path=smpl_model_path(), gender='neutral').to(device)
     J_reg = smpl_model.J_regressor.detach().cpu().numpy()
 
-    ours_seqs, cached_seqs = [], []
-    print(f"{'Sequence':<35} {'N':>5}  {'    MPJPE':>10}{'  PA-MPJPE':>10}{'      MVE':>10}{'   PA-MVE':>10}")
-    print('-' * 92)
+    KEYS = ['MPJPE', 'PA-MPJPE', 'MVE', 'PA-MVE', 'C-MPJPE', 'C-MVE', 'Pelvis-Err']
+    rows = {'ours': [], 'cached': []}
+    header = ' '.join(f'{k:>10}' for k in KEYS)
+    print(f"{'Sequence':<35} {'N':>5} {'src':<8} {header}")
+    print('-' * (35 + 5 + 8 + len(header) + 3))
     with h5py.File(args.gt, 'r') as fg:
         for seq in fg.keys():
             gt = fg[seq]['vert_cam'][:]
@@ -132,26 +154,18 @@ def main():
                 continue
             for label, pred_verts in preds:
                 n = min(pred_verts.shape[0], n_gt)
-                m, pm, v, pv = eval_seq(pred_verts[:n], gt[:n], J_reg)
-                tag = f'{seq:<35} {n:>5} [{label}]'
-                print(f"{tag:<48} {m:>8.2f}  {pm:>8.2f}  {v:>8.2f}  {pv:>8.2f}")
-                if label == 'ours':
-                    ours_seqs.append((seq, m, pm, v, pv))
-                else:
-                    cached_seqs.append((seq, m, pm, v, pv))
+                res = eval_seq(pred_verts[:n], gt[:n], J_reg)
+                values = ' '.join(f'{res[k]:>10.2f}' for k in KEYS)
+                print(f"{seq:<35} {n:>5} {label:<8} {values}")
+                rows[label].append((seq, res))
 
-    print('-' * 92)
-    def avg(rows):
-        if not rows:
-            return None
-        a = np.array([[r[1], r[2], r[3], r[4]] for r in rows])
-        return a.mean(axis=0)
-    o = avg(ours_seqs)
-    c = avg(cached_seqs)
-    if o is not None:
-        print(f'{"MEAN ours    (seq-avg)":<48} {o[0]:>8.2f}  {o[1]:>8.2f}  {o[2]:>8.2f}  {o[3]:>8.2f}')
-    if c is not None:
-        print(f'{"MEAN cached  (seq-avg)":<48} {c[0]:>8.2f}  {c[1]:>8.2f}  {c[2]:>8.2f}  {c[3]:>8.2f}')
+    print('-' * (35 + 5 + 8 + len(header) + 3))
+    for label in ('ours', 'cached'):
+        if not rows[label]:
+            continue
+        mean = {k: np.mean([r[1][k] for r in rows[label]]) for k in KEYS}
+        values = ' '.join(f'{mean[k]:>10.2f}' for k in KEYS)
+        print(f"{'MEAN ' + label + ' (seq-avg)':<35} {'':>5} {'':<8} {values}")
 
 
 if __name__ == '__main__':
