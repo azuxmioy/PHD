@@ -3,6 +3,7 @@ import smplx
 import pickle
 from tqdm import tqdm
 
+from phd.paths import MEAN_POINTS_PATH
 from phd.utils.geometry import rot6d_to_rotmat, aa_to_rotmat, perspective_projection, matrix_to_rotation_6d, rotation_matrix_to_angle_axis
 
 with open(MEAN_POINTS_PATH, 'rb') as f:
