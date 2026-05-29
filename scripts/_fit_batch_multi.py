@@ -151,7 +151,10 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
                         milestones=[200],
                         gamma=0.5)
         
-    n_iter = OPT_ITER_INNER * 2 if prev_params is None else OPT_ITER_INNER
+    if getattr(args, 'n_iter', None) is not None:
+        n_iter = args.n_iter
+    else:
+        n_iter = OPT_ITER_INNER * 2 if prev_params is None else OPT_ITER_INNER
     loop_smpl = tqdm(range(n_iter))
 
     # Support both single-frame (J, 3) and batched (B, J, 3) keypoint inputs.
@@ -229,10 +232,25 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
             kp_err = (gmof_sigma ** 2 * d2 / (gmof_sigma ** 2 + d2)).sqrt() * conf
         else:
             kp_err = torch.norm(diff, dim=2, keepdim=True) * conf
-        if bbox_scale_per_frame is None:
-            kp_loss = kp_err.mean(dim=[0, 1]) / bbox_scale
+        # Per-frame reduction: when args.per_frame_loss is set, sum over the
+        # batch dim and mean only over joints. Without this flag, mean over
+        # both gives a 1/(B*n_sample) gradient magnitude per frame compared
+        # to single-frame mode, which slows Adam convergence during the
+        # warmup phase.
+        per_frame_loss = getattr(args, 'per_frame_loss', False)
+        if per_frame_loss:
+            # kp_err shape: (B*n_sample, n_joints, 1). Mean over joints, sum
+            # over batch -> one scalar with per-frame gradient magnitude
+            # equal to single-frame.
+            if bbox_scale_per_frame is None:
+                kp_loss = kp_err.mean(dim=1).sum() / bbox_scale / n_sample
+            else:
+                kp_loss = (kp_err / bbox_scale_per_frame).mean(dim=1).sum() / n_sample
         else:
-            kp_loss = (kp_err / bbox_scale_per_frame).mean()
+            if bbox_scale_per_frame is None:
+                kp_loss = kp_err.mean(dim=[0, 1]) / bbox_scale
+            else:
+                kp_loss = (kp_err / bbox_scale_per_frame).mean()
 
         if use_hand:
             gt_hand_kps = gt_joints_2d[:, COCO25_HANDS_IDX, :2]
@@ -240,11 +258,18 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
             hand_conf[hand_conf<0.5] = 0.1
 
             hand_err = torch.norm(gt_hand_kps - hand_2d, dim=2, keepdim=True) * hand_conf
-            if bbox_scale_per_frame is None:
-                kp_loss += hand_err.mean(dim=[0, 1]) / bbox_scale * 0.05
+            if per_frame_loss:
+                if bbox_scale_per_frame is None:
+                    kp_loss += hand_err.mean(dim=1).sum() / bbox_scale / n_sample * 0.05
+                else:
+                    kp_loss += (hand_err / bbox_scale_per_frame).mean(dim=1).sum() / n_sample * 0.05
+                kp_loss += (torch.norm(opt_poses[:, -4:] - param_poses[:, -4:], dim=-1) ** 2).mean(dim=1).sum() / n_sample * 0.1
             else:
-                kp_loss += (hand_err / bbox_scale_per_frame).mean() * 0.05
-            kp_loss += (torch.norm(opt_poses[:, -4:] - param_poses[:, -4:], dim=-1) ** 2).mean(dim=[0,1]) * 0.1
+                if bbox_scale_per_frame is None:
+                    kp_loss += hand_err.mean(dim=[0, 1]) / bbox_scale * 0.05
+                else:
+                    kp_loss += (hand_err / bbox_scale_per_frame).mean() * 0.05
+                kp_loss += (torch.norm(opt_poses[:, -4:] - param_poses[:, -4:], dim=-1) ** 2).mean(dim=[0,1]) * 0.1
 
         if prev_params is not None:
             smooth_loss = ( (prev_params['camera'] - opt_cam) ** 2).sum(dim=-1).mean() + \
@@ -340,8 +365,13 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
 
                 #fit_pose_rotmat = matrix_to_rotation_6d(aa_to_rotmat(fit_res['pose_rotvecs'].view(-1, 3))).reshape(sample_surface_kp.shape[0], -1, 6).detach()
             #point_loss = torch.norm(fit_pose_rotmat[:, 1:, :] - opt_poses, dim=2).mean(dim=[0,1])
-            point_loss = (torch.norm((SMPL_J[:, :24]-pred_pelvis) - (sample_joints-sample_pelvis), dim=2) ).mean(dim=[0,1]) + \
-                         (torch.norm((smpl_V [:, SURFACE_KP]-pred_pelvis) - (sample_surface_kp-sample_pelvis), dim=2) ).mean(dim=[0,1]) * 0.1
+            if per_frame_loss:
+                # sum over batch, mean over joints/verts (per-frame gradient magnitude)
+                point_loss = (torch.norm((SMPL_J[:, :24]-pred_pelvis) - (sample_joints-sample_pelvis), dim=2)).mean(dim=1).sum() / n_sample + \
+                             (torch.norm((smpl_V [:, SURFACE_KP]-pred_pelvis) - (sample_surface_kp-sample_pelvis), dim=2)).mean(dim=1).sum() / n_sample * 0.1
+            else:
+                point_loss = (torch.norm((SMPL_J[:, :24]-pred_pelvis) - (sample_joints-sample_pelvis), dim=2) ).mean(dim=[0,1]) + \
+                             (torch.norm((smpl_V [:, SURFACE_KP]-pred_pelvis) - (sample_surface_kp-sample_pelvis), dim=2) ).mean(dim=[0,1]) * 0.1
 
         else:
             

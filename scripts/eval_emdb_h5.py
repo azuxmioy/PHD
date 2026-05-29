@@ -222,6 +222,13 @@ def main():
     parser.add_argument('--gmof_sigma', type=float, default=0.0,
                         help='If >0, use GMoF-robust 2D keypoint loss with this sigma (pixels). '
                              '_smoother.py uses 100. 0 keeps the plain L2 norm.')
+    parser.add_argument('--per_frame_loss', action='store_true',
+                        help='Use sum-over-batch (mean-over-joints) reduction so each frame '
+                             'contributes single-frame-magnitude gradient. Closes the batched '
+                             'vs per-frame convergence gap.')
+    parser.add_argument('--n_iter', type=int, default=None,
+                        help='Override OPT_ITER_INNER * (1 or 2) iter budget per fit_batch '
+                             'call. Useful for brute-force convergence in batched mode.')
     parser.add_argument('--use_heatmap', action='store_true', default=True)
     parser.add_argument('--use_vertices', action='store_true', default=True)
     parser.add_argument('--seed', type=int, default=None)
