@@ -34,6 +34,8 @@ body_models/            # SMPL model files (download separately)
 
 ## Install
 
+### Python 3.8 (matches the paper's environment)
+
 ```bash
 conda create -n phd python=3.8 -y
 conda activate phd
@@ -41,13 +43,50 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
+### Python 3.12 + CUDA 12.1 (tested on ait-server-05)
+
+```bash
+virtualenv -p python3.12 ~/envs/phd
+source ~/envs/phd/bin/activate
+
+# 1. Install torch first (cu121 wheels):
+pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
+
+# 2. Install the rest (use requirements-server.txt which has relaxed pins):
+pip install -r requirements-server.txt        # skip the chumpy line if it fails
+
+# 3. chumpy 0.70 needs two patches on Python 3.12 (still required by SMPL .pkl loading):
+pip install --no-build-isolation chumpy
+CHUMPY=$(python -c "import chumpy, os; print(os.path.dirname(chumpy.__file__))")
+sed -i 's/inspect\.getargspec/inspect.getfullargspec/g' "$CHUMPY/ch.py"
+sed -i 's/^from numpy import bool, int, float, complex, object, unicode, str, nan, inf/from numpy import nan, inf\nbool = bool; int = int; float = float; complex = complex; object = object; str = str; unicode = str/' "$CHUMPY/__init__.py"
+
+# 4. Install timm + this package:
+pip install timm
+pip install -e .
+```
+
 ## External assets
 
 You need three things that are **not** in this repo:
 
-1. **SMPL body model** — register at <https://smpl.is.tue.mpg.de/>, download `basicmodel_*_lbs_10_207_0_v1.1.0.pkl`, place them under `body_models/smpl/` (or export `SMPL_MODEL_PATH=/your/path`).
+1. **SMPL body model** — register at <https://smpl.is.tue.mpg.de/>, download both:
+   - `basicmodel_neutral_lbs_10_207_0_v1.1.0.pkl` (used by `phd.fitter`)
+   - `kid_template.npy` (used by `phd.fitter` for kid-shape regularization; ships with [smplfitter](https://github.com/isarandi/smplfitter))
+
+   Place them under `body_models/smpl/`. Override the location via `SMPL_MODEL_PATH=/your/path` and the smplfitter root via `DATA_ROOT=/parent/of/body_models`.
 2. **ViTPose-H weights** — download `vitpose-h-multi-coco.pth` (the standard ViTPose release) and place at `checkpoints/vitpose-h-multi-coco.pth` (or export `VITPOSE_CHECKPOINT=/your/path`).
 3. **PointDiT checkpoint** — already staged at `checkpoints/pointdit/`. For a public release, host on HuggingFace and add a `fetch_checkpoint.sh`.
+
+### Environment variables used at runtime
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SMPL_MODEL_PATH` | `body_models/smpl` | Folder with the `basicmodel_*.pkl` and `kid_template.npy` files. |
+| `DATA_ROOT` | repo root | Used by `phd.fitter` to find `${DATA_ROOT}/body_models/{model}/`. |
+| `VITPOSE_CHECKPOINT` | `checkpoints/vitpose-h-multi-coco.pth` | Path to ViTPose-H weights. |
+| `CUDA_VISIBLE_DEVICES` | unset | Standard PyTorch GPU selection. The demo uses ~3 GB of VRAM. |
+| `PYOPENGL_PLATFORM` | unset | Set to `egl` on headless servers without a display for `pyrender`. |
 
 ## Quick start: single-image fitting
 
