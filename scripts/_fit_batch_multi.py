@@ -13,7 +13,7 @@ mean_points = torch.from_numpy(data_dict['mean']).float()
 std_points = torch.from_numpy(data_dict['std']).float()
 
 W_KP = 1.0
-W_SMOOTH = 0
+W_SMOOTH_DEFAULT = 0
 W_POINT = 100
 
 LR_CAM = 1e-3
@@ -244,6 +244,20 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
         else:
             smooth_loss = torch.tensor([0]).to(kp_loss.device)
 
+        # Intra-batch temporal smoothness: penalize differences between
+        # consecutive frames within the current batch. Layout is interleaved
+        # [f1_s1..f1_sN, f2_s1..f2_sN, ...] so view as (B, n_sample, ...).
+        if batch_size > 1 and getattr(args, 'smooth_intra', False):
+            opt_cam_r = opt_cam.view(batch_size, n_sample, 3)
+            opt_or_r = opt_global_orient.view(batch_size, n_sample, -1)
+            opt_po_r = opt_poses.view(batch_size, n_sample, -1)
+            intra_loss = (
+                ((opt_cam_r[1:] - opt_cam_r[:-1]) ** 2).sum(dim=-1).mean()
+                + ((opt_or_r[1:] - opt_or_r[:-1]) ** 2).sum(dim=-1).mean()
+                + ((opt_po_r[1:] - opt_po_r[:-1]) ** 2).sum(dim=-1).mean()
+            )
+            smooth_loss = smooth_loss + intra_loss * getattr(args, 'smooth_intra_weight', 10.0)
+
         if use_point:
             # extract fitted points for next round of denoising
             fitted_points = torch.cat([smpl_V[:, SURFACE_KP], SMPL_J], dim= 1).clone().detach()
@@ -282,7 +296,8 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
             point_loss = torch.tensor([0]).to(kp_loss.device)
 
 
-        total_loss = kp_loss * W_KP + smooth_loss * W_SMOOTH + point_loss * W_POINT
+        w_smooth = getattr(args, 'w_smooth', W_SMOOTH_DEFAULT)
+        total_loss = kp_loss * W_KP + smooth_loss * w_smooth + point_loss * W_POINT
 
         pbar_desc = "Body Fitting -- "
         pbar_desc += f"keypoint: {kp_loss.item():.3f} | Smooth: {smooth_loss.item():.3f} | Point: {point_loss.item():.3f}"

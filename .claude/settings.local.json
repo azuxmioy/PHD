@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh -A hohs2@ait-server-05.inf.ethz.ch 'cd /data/hohs2/repos/phd && git pull 2>&1 | tail -2 && source /data/hohs2/envs/phd/bin/activate && \\\\ *)"
+    ]
+  }
+}

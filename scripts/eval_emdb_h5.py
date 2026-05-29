@@ -201,6 +201,15 @@ def main():
     parser.add_argument('--per_frame', action='store_true',
                         help='Use legacy per-frame fitting (B=1) with prev_params chaining. '
                              'Reproduces the cached run\'s setup; slower but matches paper.')
+    parser.add_argument('--smooth_intra', action='store_true',
+                        help='Add intra-batch temporal smoothness (penalize differences '
+                             'between consecutive frames in the same batch). Use with '
+                             'large batch_size (e.g. 256) and n_sample=1.')
+    parser.add_argument('--smooth_intra_weight', type=float, default=10.0,
+                        help='Multiplier on intra-batch smoothness term.')
+    parser.add_argument('--w_smooth', type=float, default=0.0,
+                        help='Weight on the smooth_loss term (combines prev_params smoothness '
+                             'and intra-batch smoothness if enabled).')
     parser.add_argument('--use_heatmap', action='store_true', default=True)
     parser.add_argument('--use_vertices', action='store_true', default=True)
     parser.add_argument('--seed', type=int, default=None)
