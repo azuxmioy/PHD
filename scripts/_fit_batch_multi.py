@@ -149,7 +149,26 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
         
     n_iter = OPT_ITER_INNER * 2 if prev_params is None else OPT_ITER_INNER
     loop_smpl = tqdm(range(n_iter))
-    gt_joints_2d = kp_2d.unsqueeze(0).to(opt_cam.device).detach()
+
+    # Support both single-frame (J, 3) and batched (B, J, 3) keypoint inputs.
+    # When batched, broadcast across the n_sample latents so the loss is
+    # computed per-frame and averaged across samples.
+    kp_2d_t = kp_2d.to(opt_cam.device).detach()
+    if kp_2d_t.ndim == 2:
+        gt_joints_2d = kp_2d_t.unsqueeze(0)                       # (1, J, 3)
+    else:
+        # (B, J, 3) -> repeat across n_sample to (B*n_sample, J, 3) so it
+        # broadcasts against pred_body_kps which is (batch_size*n_sample, J, 2).
+        gt_joints_2d = kp_2d_t.repeat_interleave(n_sample, dim=0)
+
+    # bbox can be a (3,) sequence (single frame) or (B, 3) (batched).
+    bbox_t = bbox if torch.is_tensor(bbox) else torch.tensor(bbox)
+    if bbox_t.ndim == 1:
+        bbox_scale = bbox_t[2].item()
+        bbox_scale_per_frame = None
+    else:
+        bbox_scale = None
+        bbox_scale_per_frame = bbox_t[:, 2].to(opt_cam.device).repeat_interleave(n_sample).view(-1, 1, 1)
 
     # Fitting 2D observation
     for i in loop_smpl:
@@ -195,14 +214,22 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
         #joints_openpose = (joints_2d + 0.5) * WIDTH + torch.tensor([0, 130], device=joints_2d.device)
         #joints_normalized = joints_openpose[:, opt_idx] / WIDTH
 
-        kp_loss = (torch.norm(gt_body_kps - pred_body_kps, dim=2, keepdim=True) * conf ).mean(dim=[0,1]) / bbox[2]
+        kp_err = torch.norm(gt_body_kps - pred_body_kps, dim=2, keepdim=True) * conf
+        if bbox_scale_per_frame is None:
+            kp_loss = kp_err.mean(dim=[0, 1]) / bbox_scale
+        else:
+            kp_loss = (kp_err / bbox_scale_per_frame).mean()
 
         if use_hand:
             gt_hand_kps = gt_joints_2d[:, COCO25_HANDS_IDX, :2]
             hand_conf = gt_joints_2d[:, COCO25_HANDS_IDX, 2:]
             hand_conf[hand_conf<0.5] = 0.1
 
-            kp_loss += (torch.norm(gt_hand_kps - hand_2d, dim=2, keepdim=True) * hand_conf ).mean(dim=[0,1]) / bbox[2] * 0.05
+            hand_err = torch.norm(gt_hand_kps - hand_2d, dim=2, keepdim=True) * hand_conf
+            if bbox_scale_per_frame is None:
+                kp_loss += hand_err.mean(dim=[0, 1]) / bbox_scale * 0.05
+            else:
+                kp_loss += (hand_err / bbox_scale_per_frame).mean() * 0.05
             kp_loss += (torch.norm(opt_poses[:, -4:] - param_poses[:, -4:], dim=-1) ** 2).mean(dim=[0,1]) * 0.1
 
         if prev_params is not None:
@@ -223,7 +250,7 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
                 with torch.autocast(device_type="cuda"):
                     diff_points, _, output_dict = pipeline(data,
                     args,
-                    num_images_per_prompt = batch_size * n_sample,
+                    num_images_per_prompt = n_sample,  # pipeline multiplies by B_in internally
                     num_inference_steps=args.num_inference_steps,
                     generator=generator,
                     guidance_scale=args.guidance_scale,

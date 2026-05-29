@@ -223,19 +223,20 @@ class PoseDiTPipeline(DiffusionPipeline):
         with torch.no_grad():
             heatmap = None
             cond_image = data["input_tensor"]
+            B_in = cond_image.shape[0]
             vit_features = self.backbone(cond_image)
-            cond_tokens = vit_features.clone().detach().view(1, 1280, -1).permute(0, 2, 1).repeat(num_images_per_prompt, 1, 1)
+            # vit_features: (B_in, C, H, W) -> (B_in, H*W, C) -> repeat_interleave to
+            # (B_in * num_images_per_prompt, H*W, C). Each frame gets N samples.
+            cond_tokens = (vit_features.clone().detach()
+                           .view(B_in, 1280, -1).permute(0, 2, 1)
+                           .repeat_interleave(num_images_per_prompt, dim=0))
             if args.use_heatmap:
-                #if mode == 'test':
-                #    heatmap = self.head(vit_features).repeat(num_images_per_prompt, 1, 1, 1)    # (B, 17, 64, 64)
-                #else:
-                #    heatmap = data["heatmap"].repeat(num_images_per_prompt, 1, 1, 1)
-                heatmap = self.head(vit_features).repeat(num_images_per_prompt, 1, 1, 1)    # (B, 17, 64, 64)
-
+                heatmap = self.head(vit_features).repeat_interleave(num_images_per_prompt, dim=0)
 
         device = self.transformer.device
+        n_total = B_in * num_images_per_prompt
 
-        laten_shape = (num_images_per_prompt, 283, 3) if args.use_vertices else (num_images_per_prompt, 24, 6)
+        laten_shape = (n_total, 283, 3) if args.use_vertices else (n_total, 24, 6)
 
         latents = randn_tensor(
             shape=laten_shape,
@@ -249,7 +250,8 @@ class PoseDiTPipeline(DiffusionPipeline):
         if args.use_heatmap:
             heatmap = torch.cat([heatmap] * 2) if guidance_scale > 1 else heatmap
 
-        class_labels = data["cond_betas"].repeat(num_images_per_prompt, 1)
+        # cond_betas: (B_in, beta_dim) -> repeat to (B_in * num_images_per_prompt, beta_dim).
+        class_labels = data["cond_betas"].repeat_interleave(num_images_per_prompt, dim=0)
         class_null = torch.zeros_like(class_labels)
         class_labels_input = torch.cat([class_labels, class_null], 0) if guidance_scale > 1 else class_labels
         class_labels_input = class_labels_input.to(device=device)
