@@ -1,0 +1,43 @@
+global:
+  pretrained_model_name_or_path: ''
+  output_dir: '/data/hohs2/outputs'
+  exp_name: 'pointdit_smoke'
+  seed: 2434
+
+dataset:
+  # Point directly at the downloaded single H5; the patched loader detects
+  # this layout and ignores the BEDLAM data_splits list.
+  train_data_dir: '/data/hohs2/datasets/bedlam/2_221_24_3-1__1___batch_1handhair_static_highSchoolGym_3_fps.h5'
+  test_data_dir: ''
+  dataloader_num_workers: 2
+  resolution: 256
+  sample_random_views: False
+  white_background: False
+  use_heatmap: True
+  use_vertices: True
+
+training:
+  train_batch_size: 8
+  num_train_epochs: 1
+  checkpointing_steps: 100000
+
+validation:
+  validation: False
+  test: False
+  num_gen_images: 4
+  num_validation_images: 4
+  validation_steps: 10000
+  test_steps: 10000
+
+network:
+  drop_prob: 0.05
+  guidance_scale: 2.0
+  conditioning_scale: 1.0
+  conditioning_channels: 4
+
+optimizer:
+  lr: 0.00001
+  lr_controlnet: 0.00001
+
+misc:
+  report_to: 'tensorboard'
