@@ -229,7 +229,7 @@ def main():
                       desc='batches'):
         B = batch['input_tensor'].shape[0]
         # CameraHMR init: row 0 -> global_orient, rows 1..23 -> body_pose.
-        global_orient = batch['cam_init'][:, 0]                # (B, 3, 3)
+        global_orient = batch['cam_init'][:, :1]               # (B, 1, 3, 3)
         body_pose = batch['cam_init'][:, 1:24]                 # (B, 23, 3, 3)
         with torch.no_grad():
             out = smpl_neutral(global_orient=global_orient,
