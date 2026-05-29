@@ -108,7 +108,10 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
     smpl_Vs = []
     batch_size = init_params['global_orient'].shape[0]
     n_sample = 4
-    shape = data['cond_betas']
+    # Repeat betas across n_sample so SMPL forward sees (B*n_sample, beta).
+    # In single-frame mode, betas was (1, beta) and shape broadcasting worked;
+    # for B>1 we have to interleave so each frame's beta goes with its samples.
+    shape = data['cond_betas'].repeat_interleave(n_sample, dim=0) if data['cond_betas'].shape[0] == batch_size else data['cond_betas']
 
 
     #if prev_params is not None:
