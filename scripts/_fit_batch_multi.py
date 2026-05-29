@@ -107,27 +107,26 @@ def get_opt_id(iter, n_iters, keypoint_type='vit17'):
 def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params, kp_2d, K, bbox, prev_params, keypoint_type='vit17'):
     smpl_Vs = []
     batch_size = init_params['global_orient'].shape[0]
-    n_sample = 4
-    # Repeat betas across n_sample so SMPL forward sees (B*n_sample, beta).
-    # In single-frame mode, betas was (1, beta) and shape broadcasting worked;
-    # for B>1 we have to interleave so each frame's beta goes with its samples.
-    shape = data['cond_betas'].repeat_interleave(n_sample, dim=0) if data['cond_betas'].shape[0] == batch_size else data['cond_betas']
-
-
-    #if prev_params is not None:
-    #    global_orient = prev_params['orient_6d'].clone().detach().contiguous()
-    #    opt_global_orient = global_orient.reshape(batch_size, -1, 6).requires_grad_(True)
-    #    pose = prev_params['poses_6d'].clone().detach().contiguous()
-    #    param_poses = pose.reshape(batch_size, -1, 6).requires_grad_(False)
-    #else:
-    global_orient = init_params['global_orient'].clone().detach().contiguous().reshape(batch_size, 3, 3).repeat(n_sample, 1, 1)
+    # n_sample: number of latent samples per input frame. Each sample is an
+    # independent optimization replica; the final result is averaged over
+    # samples. Read from args.n_sample with a backward-compatible default
+    # of 4 (the legacy per-frame value).
+    n_sample = getattr(args, 'n_sample', 4)
+    # Interleave each per-frame quantity across n_sample so the layout is
+    # [f1_s1, f1_s2, ..., f1_sN, f2_s1, ...] — matches the pipeline's
+    # repeat_interleave so PointDiT samples line up with their frame.
+    shape = data['cond_betas'].repeat_interleave(n_sample, dim=0)
+    global_orient = init_params['global_orient'].clone().detach().contiguous().reshape(batch_size, 3, 3).repeat_interleave(n_sample, dim=0)
     opt_global_orient = matrix_to_rotation_6d(global_orient).reshape(batch_size * n_sample, -1, 6).requires_grad_(True)
-    pose = init_params['body_pose'].clone().detach().contiguous().reshape(batch_size, -1, 3, 3).repeat(n_sample, 1, 1, 1)
+    pose = init_params['body_pose'].clone().detach().contiguous().reshape(batch_size, -1, 3, 3).repeat_interleave(n_sample, dim=0)
     param_poses = matrix_to_rotation_6d(pose).reshape(batch_size * n_sample, -1, 6).requires_grad_(False)
 
     opt_poses = param_poses.clone().requires_grad_(True)
 
-    opt_cam = init_params['camera'].clone().detach().contiguous().requires_grad_(True)
+    # opt_cam needs to broadcast against SMPL_J shaped (B*n_sample, 45, 3).
+    # Expand to (B*n_sample, 3) so opt_cam.unsqueeze(1) -> (B*n_sample, 1, 3)
+    # broadcasts cleanly.
+    opt_cam = init_params['camera'].clone().detach().reshape(batch_size, 3).repeat_interleave(n_sample, dim=0).contiguous().requires_grad_(True)
 
     opt_params = []
     opt_params.extend([
@@ -194,7 +193,8 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
         smpl_V = smpl_output.vertices
         SMPL_J = smpl_output.joints
         pred_pelvis = SMPL_J[:, [0], :]
-        joints_3d = SMPL_J - opt_cam
+        # opt_cam: (B*n_sample, 3) -> (B*n_sample, 1, 3) for broadcast over joints.
+        joints_3d = SMPL_J - opt_cam.unsqueeze(1)
 
         joints_2d = perspective_projection(joints_3d,
                                         translation=torch.zeros((batch_size * n_sample, 3), device=joints_3d.device),
@@ -294,9 +294,11 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
     
     smpl_Vs.append(smpl_output.vertices.clone().detach())
 
-    final_full_pose = torch.cat([opt_global_orient, opt_poses], dim=1).detach()
-    final_full_rotmat = rot6d_to_rotmat(final_full_pose.view(-1, 6)).view(batch_size * n_sample, -1, 3, 3)
-    avg_rotmat = avg_rot (final_full_rotmat)
+    final_full_pose = torch.cat([opt_global_orient, opt_poses], dim=1).detach()  # (B*n_sample, 24, 6)
+    final_full_rotmat = rot6d_to_rotmat(final_full_pose.view(-1, 6)).view(batch_size, n_sample, -1, 3, 3)
+    # Average samples per frame (SVD-project to a valid rotation). Loop over
+    # frames so avg_rot stays simple.
+    avg_per_frame = torch.stack([avg_rot(final_full_rotmat[b]) for b in range(batch_size)], dim=0)  # (B, 24, 3, 3)
 
     output_dict = {
         'all_vertices': smpl_Vs,
@@ -305,10 +307,10 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
         'pred_joints': smpl_output.joints.detach(),
         'poses_6d': opt_poses.detach(),
         'orient_6d': opt_global_orient.detach(),
-        'body_pose': avg_rotmat[1:].view(batch_size, -1, 3, 3),
-        'global_orient':  avg_rotmat[:1].view(batch_size, -1, 3, 3),
+        'body_pose': avg_per_frame[:, 1:],            # (B, 23, 3, 3)
+        'global_orient':  avg_per_frame[:, :1],       # (B,  1, 3, 3)
         'betas': shape.detach(),
-        'camera': opt_cam.detach(),
+        'camera': opt_cam.detach().view(batch_size, n_sample, 3).mean(dim=1),  # (B, 3)
     }
 
     return output_dict

@@ -527,6 +527,12 @@ if __name__ == "__main__":
         help="Number of inference steps",
     )
     parser.add_argument(
+        "--n_sample",
+        type=int,
+        default=4,
+        help="Number of PointDiT samples per input frame; final result averages over n_sample.",
+    )
+    parser.add_argument(
         "--use_heatmap",
         action="store_true",
         default=True,

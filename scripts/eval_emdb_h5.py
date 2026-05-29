@@ -196,6 +196,8 @@ def main():
     parser.add_argument('--num_inference_steps', type=int, default=5)
     parser.add_argument('--guidance_scale', type=float, default=1.5)
     parser.add_argument('--num_validation_images', type=int, default=1)
+    parser.add_argument('--n_sample', type=int, default=4,
+                        help='PointDiT samples per input frame; final result averages over n_sample.')
     parser.add_argument('--use_heatmap', action='store_true', default=True)
     parser.add_argument('--use_vertices', action='store_true', default=True)
     parser.add_argument('--seed', type=int, default=None)
