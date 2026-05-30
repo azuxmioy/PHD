@@ -1,0 +1,31 @@
+# V11 = V8 + lr_pose=1e-4. The LR sweep on P1_14 found that reducing the
+# body-pose LR by 10x lets us refine the (already-good) CameraHMR init
+# without drifting away from it. On P1_14 this gives:
+#   MPJPE 49.81 (vs V8 52.97, vs cached 54.20, vs init+camcache 50.40).
+
+fit:
+  batch_size: 64
+  n_sample: 4
+  n_iter: 50
+  per_frame: false
+
+pipeline:
+  num_inference_steps: 5
+  guidance_scale: 1.5
+  use_heatmap: true
+  use_vertices: true
+
+loss:
+  w_smooth: 0.0
+  smooth_intra: false
+  smooth_intra_weight: 10.0
+  smooth_causal: false
+  w_jitter: 0.0
+  w_reg_init: 0.0
+  gmof_sigma: 0.0
+  per_frame_loss: false
+
+optimizer:
+  lr_cam: 1.0e-3
+  lr_pose: 1.0e-4     # 10x smaller than the V8 default; key knob
+  lr_orient: 1.0e-5
