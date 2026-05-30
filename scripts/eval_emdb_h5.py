@@ -192,6 +192,7 @@ _YAML_SECTIONS = {
         'w_smooth', 'smooth_intra', 'smooth_intra_weight', 'smooth_causal',
         'w_jitter', 'w_reg_init', 'gmof_sigma', 'per_frame_loss',
     },
+    'optimizer': {'lr_cam', 'lr_pose', 'lr_orient'},
 }
 
 
@@ -278,6 +279,13 @@ def main():
     parser.add_argument('--n_iter', type=int, default=None,
                         help='Override OPT_ITER_INNER * (1 or 2) iter budget per fit_batch '
                              'call. Useful for brute-force convergence in batched mode.')
+    parser.add_argument('--lr_cam', type=float, default=1e-3,
+                        help='Adam LR for camera params. Default 1e-3.')
+    parser.add_argument('--lr_pose', type=float, default=1e-3,
+                        help='Adam LR for body-pose params. Default 1e-3. Reduce to lean on '
+                             'the CameraHMR init pose more strongly.')
+    parser.add_argument('--lr_orient', type=float, default=1e-5,
+                        help='Adam LR for global-orient params. Default 1e-5 (already small).')
     parser.add_argument('--use_heatmap', action='store_true', default=True)
     parser.add_argument('--use_vertices', action='store_true', default=True)
     parser.add_argument('--seed', type=int, default=None)

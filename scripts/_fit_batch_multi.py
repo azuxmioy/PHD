@@ -129,20 +129,14 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
     # broadcasts cleanly.
     opt_cam = init_params['camera'].clone().detach().reshape(batch_size, 3).repeat_interleave(n_sample, dim=0).contiguous().requires_grad_(True)
 
+    lr_cam = getattr(args, 'lr_cam', LR_CAM)
+    lr_pose = getattr(args, 'lr_pose', LR_POSE)
+    lr_orient = getattr(args, 'lr_orient', LR_ORIENT)
     opt_params = []
     opt_params.extend([
-            {
-                "params": opt_cam,
-                'lr': LR_CAM
-            },
-            {
-                "params": opt_poses,
-                'lr': LR_POSE
-            },
-            {
-                "params": opt_global_orient,
-                'lr': LR_ORIENT
-            }
+            {"params": opt_cam, 'lr': lr_cam},
+            {"params": opt_poses, 'lr': lr_pose},
+            {"params": opt_global_orient, 'lr': lr_orient},
     ])
     optimizer_smpl = torch.optim.Adam(opt_params, betas=(0.9, 0.999), amsgrad=True)
 
