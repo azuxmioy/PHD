@@ -22,130 +22,41 @@ Usage:
         --output_dir results/emdb_h5
 """
 import argparse
-import io
 import os
-import pickle
 import sys
 
 import h5py
 import numpy as np
 import torch
 import smplx
-from PIL import Image
-from torchvision import transforms
 from tqdm import tqdm
 from accelerate.utils import set_seed
-from diffusers import FlowMatchEulerDiscreteScheduler
 
 # Make sibling helpers (_fit_batch_multi.py) importable.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from phd.inference import (
+    IMAGE_TRANSFORM,
+    SMPL_TO_OPENPOSE,
+    create_backbone,
+    find_cam_pos,
+    jpeg_to_pil,
+)
 from phd.models.pose_dit import PoseDiTTransformer2DModel
 from phd.models.pipeline import PoseDiTPipeline
-from phd.models.vit import vit
-from phd.models.heatmap_head import head
-from phd.utils.geometry import rot6d_to_rotmat, aa_to_rotmat
-from phd.utils.renderer import Renderer
 from phd.fitter.pt.fitter import SMPLFitter
 from phd.fitter.pt.bodymodel import SMPLBodyModel
 from phd.surface_kp import SURFACE_KP
 from phd.paths import (
-    CHECKPOINTS_DIR,
-    MEAN_POINTS_PATH,
     SCHEDULER_FLOW_YAML,
     smpl_model_path,
     smplfitter_data_root,
 )
+from diffusers import FlowMatchEulerDiscreteScheduler
 
 os.environ.setdefault('DATA_ROOT', smplfitter_data_root())
 
 from _fit_batch_multi import fit_batch
-
-IMAGE_MEAN = [0.485, 0.456, 0.406]
-IMAGE_STD = [0.229, 0.224, 0.225]
-TRANSFORM = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize(mean=IMAGE_MEAN, std=IMAGE_STD),
-])
-
-SMPL_TO_OPENPOSE = [24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8, 1, 4,
-                    7, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
-
-
-def jpeg_to_pil(b):
-    if isinstance(b, np.ndarray):
-        b = b.tobytes()
-    return Image.open(io.BytesIO(bytes(b))).convert('RGB')
-
-
-def find_cam_pos(P3d, P2d, K):
-    """Batched weighted least-squares camera solve from 3D joints and 2D
-    keypoints with confidence. Matches scripts/fit_emdb.find_cam_pos.
-    """
-    b, n, _ = P3d.shape
-    fx, s, cx = K[0]
-    _, fy, cy = K[1]
-    X, Y, Z = P3d[..., 0], P3d[..., 1], P3d[..., 2]
-    U, V = P2d[..., 0], P2d[..., 1]
-    left = torch.zeros((b, n, 2, 3), device=P3d.device)
-    left[:, :, 0, 0] = fx
-    left[:, :, 0, 1] = s
-    left[:, :, 0, 2] = cx - U
-    left[:, :, 1, 1] = fy
-    left[:, :, 1, 2] = cy - V
-    right = torch.zeros((b, n, 2), device=P3d.device)
-    right[:, :, 0] = fx * X + s * Y + cx * Z - U * Z
-    right[:, :, 1] = fy * Y + cy * Z - V * Z
-    A = left.reshape((b, -1, 3))
-    R = right.reshape((b, -1, 1))
-    W = torch.sqrt(P2d[..., 2:].clamp(min=0)).repeat(1, 1, 2).reshape((b, -1, 1)).float()
-    X_ = torch.linalg.lstsq(A * W, R * W).solution
-    return X_.view(b, -1).detach()
-
-
-def prepare_statedict(model, full_state_dict, partname):
-    import re
-    from collections import OrderedDict
-    part = {k: v for k, v in full_state_dict.items() if k.startswith(partname)}
-    cleaned = OrderedDict()
-    for name, p in part.items():
-        if re.match(f'^{partname}', name):
-            name = name.replace(f'{partname}.', '')
-        cleaned[name] = p
-    try:
-        model.load_state_dict(cleaned, strict=True)
-    except Exception as e:
-        print(f'Mismatch in {partname}: {e}\nPartial load.')
-        model.load_state_dict(cleaned, strict=False)
-    return model
-
-
-def resize_pos_embed(pos_embed, src_shape, dst_shape, num_extra_tokens=1):
-    import torch.nn.functional as F
-    if src_shape == dst_shape:
-        return pos_embed
-    _, L, C = pos_embed.shape
-    src_h, src_w = src_shape
-    extra = pos_embed[:, :num_extra_tokens]
-    w = (pos_embed[:, num_extra_tokens:]
-         .reshape(1, src_h, src_w, C).permute(0, 3, 1, 2).float())
-    w = F.interpolate(w, size=dst_shape, align_corners=False, mode='bicubic')
-    w = torch.flatten(w, 2).transpose(1, 2).to(pos_embed.dtype)
-    return torch.cat((extra, w), dim=1)
-
-
-def create_backbone():
-    backbone, heatmap_head = vit(), head()
-    vitpose_path = os.environ.get('VITPOSE_CHECKPOINT',
-                                  str(CHECKPOINTS_DIR / 'vitpose-h-multi-coco.pth'))
-    ckpt = torch.load(vitpose_path, map_location='cpu', weights_only=False)['state_dict']
-    prepare_statedict(backbone, ckpt, 'backbone')
-    prepare_statedict(heatmap_head, ckpt, 'keypoint_head')
-    backbone.pos_embed = torch.nn.Parameter(
-        resize_pos_embed(backbone.pos_embed, (16, 12), (16, 16))
-    )
-    return backbone, heatmap_head
-
 
 def iter_h5_batches(h5_path, sequence, batch_size, device, max_frames=None):
     """Yield batched data dicts ready for fit_batch.
@@ -168,7 +79,7 @@ def iter_h5_batches(h5_path, sequence, batch_size, device, max_frames=None):
             end = min(start + batch_size, n)
             crops = [jpeg_to_pil(seq['crop'][i]) for i in range(start, end)]
             full_imgs = [jpeg_to_pil(seq['full_img'][i]) for i in range(start, end)]
-            input_tensor = torch.stack([TRANSFORM(c) for c in crops]).to(device)
+            input_tensor = torch.stack([IMAGE_TRANSFORM(c) for c in crops]).to(device)
             kp2d = torch.from_numpy(seq['kp2d'][start:end]).float()  # CPU; fit_batch puts to device
             cam_init = cam_init_all[start:end].to(device)            # (B, 24, 3, 3)
             bbox_batch = bbox_all[start:end]                          # (B, 3)

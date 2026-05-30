@@ -291,16 +291,20 @@ def main(args):
     pipeline.set_progress_bar_config(disable=True)
 
     SMPL_neutral = SMPL_neutral.to(device)
-    person_list = ['data']
+    if args.subjects:
+        person_list = args.subjects
+    else:
+        person_list = [
+            x for x in sorted(os.listdir(args.test_data_dir))
+            if os.path.isdir(os.path.join(args.test_data_dir, x)) and not x.startswith('.')
+        ]
 
     for person_name in person_list:
     
-        #take_list = [x for x in sorted(os.listdir(os.path.join(args.test_data_dir, person_name))) if 
-        #                 os.path.isdir(os.path.join(args.test_data_dir, person_name, x))]
-        take_list = [
-           'v105'
-        ]
-
+        take_list = [x for x in sorted(os.listdir(os.path.join(args.test_data_dir, person_name))) if 
+                         os.path.isdir(os.path.join(args.test_data_dir, person_name, x))]
+        if args.sequences:
+            take_list = [x for x in take_list if x in set(args.sequences)]
 
         for take_name in take_list:
 
@@ -333,7 +337,7 @@ def main(args):
 
                 full_image = cv2.imread(os.path.join(os.path.join(full_image_path, im)))
                 H, W, C = full_image.shape
-                focal = 1424.58
+                focal = args.focal_length
                 K = np.array([[focal, 0, W/2],
                           [0, focal, H/2],
                           [0, 0, 1]])
@@ -498,7 +502,7 @@ def main(args):
                     )
                 
                 # Save RGB image as binary png file
-                img_cv2 = np.ones((H, W, 4)).astype(np.float)
+                img_cv2 = np.ones((H, W, 4)).astype(np.float32)
                 img_cv2[...,:3] = np.array(full_image) / 255.0
                 input_img_overlay = img_cv2[:,:,:3] * (1-render_init[:,:,3:]) + render_init[:,:,:3] * render_init[:,:,3:]
                 input_img_overlay = (input_img_overlay * 255).astype(np.uint8)
@@ -539,7 +543,7 @@ def main(args):
                     )
                 
                 # Save RGB image as binary png file
-                img_cv2 = np.ones((H, W, 4)).astype(np.float)
+                img_cv2 = np.ones((H, W, 4)).astype(np.float32)
                 img_cv2[...,:3] = np.array(full_image) / 255.0
                 input_img_overlay = img_cv2[:,:,:3] * (1-render_fit[:,:,3:]) + render_fit[:,:,:3] * render_fit[:,:,3:]
                 input_img_overlay = (input_img_overlay * 255).astype(np.uint8)
@@ -583,18 +587,32 @@ if __name__ == "__main__":
     parser.add_argument(
         "--exp_name",
         type=str,
-        default="flow_5_v2_6d_emdb_fitbetas_prevnoise_2",
-        help=(
-            "The output path for the generated images. The generated images will be saved in this path."
-        ),
+        default="video_fit",
+        help="Name of the output folder written under each video sequence.",
     )
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
-        default='checkpoint-30000',
-        #default='checkpoints/trainvaltest-vitbb-square-vertex-aug-8gpu/20250115-201618/checkpoint-48000',
-        #default="checkpoints/trainvaltest-vitbb-square-vertex-augv2-rot90-drop20-heatmap-8gpu-finetune-visval/20250120-115127/checkpoint-39000", 
+        default='checkpoints/pointdit',
         help="Path to pretrained model or model identifier from huggingface.co/models.",
+    )
+    parser.add_argument(
+        "--subjects",
+        nargs="+",
+        default=None,
+        help="Optional subject folders under test_data_dir. Defaults to all folders found.",
+    )
+    parser.add_argument(
+        "--sequences",
+        nargs="+",
+        default=None,
+        help="Optional sequence folders under each subject. Defaults to all folders found.",
+    )
+    parser.add_argument(
+        "--focal_length",
+        type=float,
+        default=1424.58,
+        help="Fallback focal length used when fitting videos without per-frame intrinsics.",
     )
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument(

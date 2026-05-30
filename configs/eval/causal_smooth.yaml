@@ -1,0 +1,30 @@
+# EMDB benchmark config with causal intra-batch temporal smoothness.
+# The previous frame is detached so smoothness gradients only affect the
+# current frame in each consecutive pair.
+
+fit:
+  batch_size: 64
+  n_sample: 4
+  n_iter: 50
+  per_frame: false
+
+pipeline:
+  num_inference_steps: 5
+  guidance_scale: 1.5
+  use_heatmap: true
+  use_vertices: true
+
+loss:
+  w_smooth: 1.0
+  smooth_intra: true
+  smooth_intra_weight: 10.0
+  smooth_causal: true
+  w_jitter: 0.0
+  w_reg_init: 0.0
+  gmof_sigma: 0.0
+  per_frame_loss: false
+
+optimizer:
+  lr_cam: 1.0e-3
+  lr_pose: 1.0e-4
+  lr_orient: 1.0e-5

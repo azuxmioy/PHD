@@ -5,15 +5,15 @@
 #   bash scripts/eval_emdb_all.sh <config_yaml> [<h5_path> <output_dir>]
 #
 # Examples:
-#   bash scripts/eval_emdb_all.sh configs/eval/v8_fast.yaml
-#   bash scripts/eval_emdb_all.sh configs/eval/v9_smooth.yaml \
-#       /data/emdb_eval.h5 results/v9_smooth/
+#   bash scripts/eval_emdb_all.sh configs/eval/recommended.yaml
+#   bash scripts/eval_emdb_all.sh configs/eval/causal_smooth.yaml \
+#       /data/emdb_eval.h5 results/causal_smooth/
 #
 # After all sequences finish, compute_metrics_h5.py runs automatically and the
 # table is written to <output_dir>/metrics.txt.
 set -euo pipefail
 
-CONFIG="${1:-configs/eval/v8_fast.yaml}"
+CONFIG="${1:-configs/eval/recommended.yaml}"
 H5="${2:-${EMDB_H5:-/data/hohs2/datasets/emdb/emdb_eval.h5}}"
 OUT="${3:-results/$(basename "$CONFIG" .yaml)}"
 CACHED="${EMDB_CACHED:-/data/hohs2/datasets/emdb_cached/cached.h5}"

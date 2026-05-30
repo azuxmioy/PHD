@@ -1,0 +1,29 @@
+# EMDB benchmark config with sequence-level smoother-style losses inside
+# batched fitting. Use when temporal stability matters more than raw speed.
+
+fit:
+  batch_size: 256
+  n_sample: 1
+  n_iter: 50
+  per_frame: false
+
+pipeline:
+  num_inference_steps: 5
+  guidance_scale: 1.5
+  use_heatmap: true
+  use_vertices: true
+
+loss:
+  w_smooth: 1.0
+  smooth_intra: true
+  smooth_intra_weight: 10.0
+  smooth_causal: false
+  w_jitter: 0.2
+  w_reg_init: 0.5
+  gmof_sigma: 100.0
+  per_frame_loss: false
+
+optimizer:
+  lr_cam: 1.0e-3
+  lr_pose: 1.0e-4
+  lr_orient: 1.0e-5

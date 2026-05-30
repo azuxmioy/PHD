@@ -22,6 +22,7 @@ scripts/                # CLI entry points
 ├── fit_emdb.py         # EMDB evaluation (on-disk layout)
 ├── eval_emdb_h5.py     # EMDB evaluation (H5 bundle, batched fitting)
 ├── fit_video.py        # in-the-wild video fitting w/ temporal smoothing
+├── gen_vid.py          # turn rendered frames into mp4
 ├── train.py            # PointDiT training
 ├── train.sh            # accelerate launcher
 └── _*.py               # internal helpers (fit_batch, smoother, etc.)
@@ -170,20 +171,20 @@ You need:
 
 ```bash
 python scripts/eval_emdb_h5.py \
-    --config configs/eval/v11_v8_lr1e4.yaml \
+    --config configs/eval/recommended.yaml \
     --h5 /path/to/emdb_eval.h5 \
     --sequence P1_14_outdoor_climb \
-    --output_dir results/v11a/
+    --output_dir results/recommended/
 ```
 
-Output: `results/v11a/P1_14_outdoor_climb_params.npz` containing
+Output: `results/recommended/P1_14_outdoor_climb_params.npz` containing
 `global_orient (N,1,3,3) / body_pose (N,23,3,3) / camera (N,3) / betas (N,10)`.
 
 ### All 17 sequences + auto-metrics
 
 ```bash
 EMDB_H5=/path/to/emdb_eval.h5 EMDB_CACHED=/path/to/cached.h5 \
-    bash scripts/eval_emdb_all.sh configs/eval/v11_v8_lr1e4.yaml
+    bash scripts/eval_emdb_all.sh configs/eval/recommended.yaml
 # default output_dir: results/<config-basename>/
 ```
 
@@ -191,17 +192,15 @@ After all 17 finish, this calls `compare_metrics_h5.py` (or `compute_metrics_h5.
 
 ### Available configs and what they give you
 
-| Config | What | Mean MPJPE (17 seq) | s/frame |
+| Public config | What | Mean MPJPE (17 seq) | s/frame |
 |---|---|---:|---:|
-| `v0_baseline.yaml` | batched, n_iter=200 (original) | 68.31 | 0.24 |
-| `v1_perframe.yaml` | B=1, prev_params chain (slow but reproduces cached) | (~55 on P1_14) | 4.2 |
-| `v8_fast.yaml` | batched, n_iter=50 | 63.91 | 0.18 |
-| `v9_bidirectional.yaml` | v8 + symmetric intra-batch smoothness | 63.53 | 0.18 |
-| `v9_causal.yaml` | v8 + one-way (detach past) smoothness | – | 0.18 |
-| **`v11_v8_lr1e4.yaml`** | **v8 + `lr_pose=1e-4`** | **61.94** | **0.18** |
-| `v11_v9causal_lr1e4.yaml` | v9-causal + `lr_pose=1e-4` | 61.93 | 0.18 |
+| **`recommended.yaml`** | **batched fit, `lr_pose=1e-4`** | **61.94** | **0.18** |
+| `causal_smooth.yaml` | recommended + one-way temporal smoothness | 61.93 | 0.18 |
+| `global_smooth.yaml` | smoother-style sequence losses inside batched fitting | demo-focused | 0.18 |
+| `per_frame.yaml` | B=1, prev_params chain (paper-style, slow) | (~55 on P1_14) | 4.2 |
+| `fast.yaml` | batched, n_iter=50 ablation | 63.91 | 0.18 |
 
-**`v11_v8_lr1e4.yaml` is the recommended config.** Reducing `lr_pose` 10× lets us refine the (already-good) CameraHMR init without drifting away from it. Beats the paper's cached run (62.52 MPJPE) by ~0.6 mm while being ~17× faster than the paper's per-frame setup.
+**`recommended.yaml` is the default config.** Reducing `lr_pose` 10× lets us refine the (already-good) CameraHMR init without drifting away from it. The old `v*.yaml` files are kept as legacy aliases for internal experiment tracing, but new scripts and docs use descriptive config names.
 
 ### Add temporal smoothing (V11c)
 
@@ -211,18 +210,18 @@ Post-fit LBFGS smoother on top of any `eval_emdb_h5.py` output. Mostly for demo 
 python scripts/smooth_emdb_h5.py \
     --h5 /path/to/emdb_eval.h5 \
     --sequence P1_14_outdoor_climb \
-    --input_npz results/v11a/P1_14_outdoor_climb_params.npz \
-    --output_npz results/v11c/P1_14_outdoor_climb_params.npz \
+    --input_npz results/recommended/P1_14_outdoor_climb_params.npz \
+    --output_npz results/recommended_smooth/P1_14_outdoor_climb_params.npz \
     --n_iter 10 \
-    [--render_dir results/v11c/overlays/P1_14]   # optional: per-frame PNG overlays for video
+    [--render_dir results/recommended_smooth/overlays/P1_14]   # optional: per-frame PNG overlays for video
 ```
 
 Apply over all 17 with a one-liner:
 ```bash
-for f in results/v11a/*_params.npz; do
+for f in results/recommended/*_params.npz; do
     seq=$(basename "$f" _params.npz)
     python scripts/smooth_emdb_h5.py --h5 $EMDB_H5 --sequence $seq \
-        --input_npz "$f" --output_npz "results/v11c/${seq}_params.npz" --n_iter 10
+        --input_npz "$f" --output_npz "results/recommended_smooth/${seq}_params.npz" --n_iter 10
 done
 ```
 
@@ -247,11 +246,11 @@ done
 | Method | MPJPE | PA-MPJPE | MVE | C-MPJPE | Pelvis-Err |
 |---|--:|--:|--:|--:|--:|
 | paper cached PHD run | 62.52 | 42.50 | 74.61 | 137.37 | 131.72 |
-| **`v11_v8_lr1e4.yaml`** | **61.94** | **42.60** | **73.04** | **95.97** | **82.19** |
-| `v11_v9causal_lr1e4.yaml` | 61.93 | 42.57 | 73.03 | 95.71 | 81.87 |
-| `v11_v8_lr1e4` + smoother | **61.37** | **42.27** | **72.50** | **93.82** | **80.29** |
+| **`recommended.yaml`** | **61.94** | **42.60** | **73.04** | **95.97** | **82.19** |
+| `causal_smooth.yaml` | 61.93 | 42.57 | 73.03 | 95.71 | 81.87 |
+| `recommended.yaml` + smoother | **61.37** | **42.27** | **72.50** | **93.82** | **80.29** |
 
-All v11 variants **match or beat the paper run** on MPJPE while being **~50 mm better** on absolute Pelvis-Err.
+The recommended variants **match or beat the paper run** on MPJPE while being **~50 mm better** on absolute Pelvis-Err.
 
 ### Preprocessing — building `emdb_eval.h5` from raw EMDB
 
@@ -278,7 +277,30 @@ The scripts in `release_code/emdb_test/` are the unfiltered preprocessing code f
 python scripts/fit_emdb.py \
     --test_data_dir ./emdb \
     --shape_dir ./guess_shape \
+    --subjects P1 P8 \
     --pretrained_model_name_or_path checkpoints/pointdit
+```
+
+## In-the-wild videos
+
+`scripts/fit_video.py` expects a prepared video folder with `rgb/`, `cropped_new/`, `bbox/`, `openpose/`, and `neutral_shape.npy` under `<root>/<subject>/<sequence>/`. It writes rendered overlays, meshes, and SMPL params to `<sequence>/<exp_name>/`.
+
+```bash
+python scripts/fit_video.py \
+    --test_data_dir ./video_data \
+    --subjects data \
+    --sequences v105 \
+    --exp_name video_fit \
+    --pretrained_model_name_or_path checkpoints/pointdit
+```
+
+Create an mp4 from rendered overlays:
+
+```bash
+python scripts/gen_vid.py \
+    --image_dir ./video_data/data/v105/video_fit \
+    --output ./video_data/data/v105/video_fit/fitter.mp4 \
+    --fps 30
 ```
 
 ## Training PointDiT

@@ -213,7 +213,7 @@ def main(args):
 
         full_image = cv2.imread(os.path.join(os.path.join(img_path, img+'.jpg')))
         H, W, C = full_image.shape
-        img_cv2 = np.ones((H, W, 4)).astype(np.float)
+        img_cv2 = np.ones((H, W, 4)).astype(np.float32)
 
         smpl_output = SMPL_neutral(global_orient=params[2][i].reshape(1, -1).cuda(),
                               body_pose=params[1][i].reshape(1, -1).cuda(),
@@ -228,7 +228,7 @@ def main(args):
                     )
                 
         # Save RGB image as binary png file
-        img_cv2 = np.ones((H, W, 4)).astype(np.float)
+        img_cv2 = np.ones((H, W, 4)).astype(np.float32)
         img_cv2[...,:3] = np.array(full_image) / 255.0
         input_img_overlay = img_cv2[:,:,:3] * (1-render_fit[:,:,3:]) + render_fit[:,:,:3] * render_fit[:,:,3:]
         input_img_overlay = (input_img_overlay * 255).astype(np.uint8)

@@ -4,9 +4,7 @@ Copyright (C) 2024  ETH Zurich, Hsuan-I Ho
 import logging
 import math
 import os
-import re
 import copy
-import pickle
 import shutil
 import smplx
 import numpy as np
@@ -21,7 +19,6 @@ from accelerate.utils import  set_seed
 from datetime import datetime, timedelta
 from packaging import version
 from tqdm.auto import tqdm
-from collections import OrderedDict
 
 import accelerate
 from accelerate import Accelerator
@@ -29,45 +26,31 @@ from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration, set_seed, InitProcessGroupKwargs
 
 import diffusers
-from diffusers import (
-    AutoencoderKL,
-    ControlNetModel,
-    DDPMScheduler,
-    UNet2DConditionModel,
-    FlowMatchEulerDiscreteScheduler
-)
+from diffusers import FlowMatchEulerDiscreteScheduler
 
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
 
 import transformers
-from transformers import CLIPVisionModelWithProjection
 
 from phd.data.dataset import TrainDiffDataset
 from phd.data.test_dataset import TestDiffDataset
 from phd.data.config import parse_options, argparse_to_str
+from phd.inference import create_backbone, load_point_statistics
 from phd.models.pose_dit import PoseDiTTransformer2DModel
-from phd.models.vit import vit
-from phd.models.heatmap_head import head
 from phd.models.pipeline import PoseDiTPipeline
 from phd.utils.geometry import rot6d_to_rotmat
 from phd.utils.renderer import Renderer
 from phd.fitter.pt.fitter import SMPLFitter
 from phd.fitter.pt.bodymodel import SMPLBodyModel
 from phd.paths import (
-    CHECKPOINTS_DIR,
-    MEAN_POINTS_PATH,
     smpl_model_path,
     smplfitter_data_root,
 )
 
 os.environ.setdefault('DATA_ROOT', smplfitter_data_root())
-
-with open(MEAN_POINTS_PATH, 'rb') as f:
-    data_dict = pickle.load(f)
-mean_points = torch.from_numpy(data_dict['mean']).float()
-std_points = torch.from_numpy(data_dict['std']).float()
+mean_points, std_points = load_point_statistics()
 
 #from lib.test_diffusion_dataset import TestDiffDataset
 #from lib.ccprojection import CCProjection
@@ -276,105 +259,6 @@ def log_validation(logger, val_dataloader, backbone, head, dit, scheduler,
         return image_logs
 
 
-
-def prepare_statedict(model, full_state_dict, partname, strict=True):
-    part_statedict = {}
-    new_part_statedict = OrderedDict()
-
-    # Load only the part given by sel_partname
-    for key in full_state_dict.keys():
-        if key.startswith(f'{partname}'):
-            part_statedict[key] = full_state_dict[key]
-
-    # Replace mismatch names
-    for name, param in part_statedict.items():
-        if re.match(f'^{partname}', name):
-            name = name.replace(f'{partname}.', '')
-        new_part_statedict[name] = param
-
-    try:
-        model.load_state_dict(new_part_statedict, strict=True)
-    except Exception as e:
-        print(f'Mismatch in statedict of {partname}!!!')
-        print(f'{e}')
-        if not strict:
-            print(f'Partially Initializing {partname}...')
-            model.load_state_dict(new_part_statedict, strict=False)
-    return model
-
-def resize_pos_embed(pos_embed,
-                     src_shape,
-                     dst_shape,
-                     mode='bicubic',
-                     num_extra_tokens=1):
-    """Resize pos_embed weights.
-
-    Args:
-        pos_embed (torch.Tensor): Position embedding weights with shape
-            [1, L, C].
-        src_shape (tuple): The resolution of downsampled origin training
-            image, in format (H, W).
-        dst_shape (tuple): The resolution of downsampled new training
-            image, in format (H, W).
-        mode (str): Algorithm used for upsampling. Choose one from 'nearest',
-            'linear', 'bilinear', 'bicubic' and 'trilinear'.
-            Defaults to 'bicubic'.
-        num_extra_tokens (int): The number of extra tokens, such as cls_token.
-            Defaults to 1.
-
-    Returns:
-        torch.Tensor: The resized pos_embed of shape [1, L_new, C]
-    """
-    if src_shape[0] == dst_shape[0] and src_shape[1] == dst_shape[1]:
-        return pos_embed
-    assert pos_embed.ndim == 3, 'shape of pos_embed must be [1, L, C]'
-    _, L, C = pos_embed.shape
-    src_h, src_w = src_shape
-    assert L == src_h * src_w + num_extra_tokens, \
-        f"The length of `pos_embed` ({L}) doesn't match the expected " \
-        f'shape ({src_h}*{src_w}+{num_extra_tokens}). Please check the' \
-        '`img_size` argument.'
-    extra_tokens = pos_embed[:, :num_extra_tokens]
-
-    src_weight = pos_embed[:, num_extra_tokens:]
-    src_weight = src_weight.reshape(1, src_h, src_w, C).permute(0, 3, 1, 2)
-
-    # The cubic interpolate algorithm only accepts float32
-    dst_weight = F.interpolate(
-        src_weight.float(), size=dst_shape, align_corners=False, mode=mode)
-    dst_weight = torch.flatten(dst_weight, 2).transpose(1, 2)
-    dst_weight = dst_weight.to(src_weight.dtype)
-
-    return torch.cat((extra_tokens, dst_weight), dim=1)
-
-
-def create_backbone():
-    
-    '''
-    backbone = vit()
-    
-    pt_model = torch.load('vitpose_backbone.pth', map_location='cpu')['state_dict']
-    try:
-        backbone.load_state_dict(pt_model, strict=True)
-    except Exception as e:
-        print(f'{e}')
-        backbone.load_state_dict(pt_model, strict=False)
-    
-    pt_model = torch.load('tokenhmr_model.ckpt', map_location='cpu')['state_dict']
-    prepare_statedict(backbone, pt_model, 'backbone')
-    '''
-
-    backbone, heatmap_head = vit(), head()
-
-    vitpose_path = os.environ.get('VITPOSE_CHECKPOINT', str(CHECKPOINTS_DIR / 'vitpose-h-multi-coco.pth'))
-    pt_model = torch.load(vitpose_path, map_location='cpu')['state_dict']
-
-    prepare_statedict(backbone, pt_model, 'backbone')
-    prepare_statedict(heatmap_head, pt_model, 'keypoint_head')
-
-    backbone.pos_embed = torch.nn.Parameter(resize_pos_embed (backbone.pos_embed,(16, 12), (16, 16)))
-
-    return backbone, heatmap_head
 
 def main(args, args_str):
 
