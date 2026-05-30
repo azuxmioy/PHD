@@ -7,23 +7,13 @@ Usage:
   python visualize.py P8 68_outdoor_handstand
 """
 import argparse
-import glob
 import os
-import pickle as pkl
 import trimesh
-import json
-from smplx import SMPL, SMPLX
-from tqdm import tqdm
+from smplx import SMPL
 import matplotlib.pyplot as plt
 
-import cv2
 import numpy as np
 from aitviewer.configuration import CONFIG as C
-from aitviewer.models.smpl import SMPLLayer
-from aitviewer.renderables.billboard import Billboard
-#from aitviewer.renderables.lines import LinesTrail
-from aitviewer.renderables.smpl import SMPLSequence
-from aitviewer.scene.camera import OpenCVCamera
 from aitviewer.viewer import Viewer
 from aitviewer.renderables.meshes import Meshes
 
@@ -32,21 +22,17 @@ C.window_type = "pyglet"
 def main(args):
 
 
-    gt_path = 'compare/gt'
-    
-    method_1_path = 'compare/ours_height'
-    method_2_path = 'compare/ours_height_weight'
-    #method_1_path = 'compare/ours_height_weight'
-    #method_2_path = 'compare/camerahmr'
+    gt_path = args.gt_path
+    method_1_path = args.method_1_path
+    method_2_path = args.method_2_path
 
     # Create the viewer.
     colormap = plt.cm.jet
     viewer_size = None
 
     viewer = Viewer(size=viewer_size)
-    import os as _os
-    SMPL_MODEL_PATH = _os.environ.get('SMPL_MODEL_PATH', 'body_models/smpl')
-    J_regressor_24_SMPL_neutral = SMPL(model_path=SMPL_MODEL_PATH,
+    from phd.paths import smpl_model_path
+    J_regressor_24_SMPL_neutral = SMPL(model_path=smpl_model_path(),
                                         gender='neutral').J_regressor.cpu().numpy()
     
     gt_meshes = [ x for x in sorted(os.listdir(gt_path)) if x.endswith('.obj') ]
@@ -130,5 +116,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--gt_path", default="compare/gt")
+    parser.add_argument("--method_1_path", default="compare/ours_height")
+    parser.add_argument("--method_2_path", default="compare/ours_height_weight")
     args = parser.parse_args()
     main(args)

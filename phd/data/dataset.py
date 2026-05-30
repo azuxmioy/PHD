@@ -4,8 +4,6 @@ Copyright (C) 2024  ETH Zurich, Hsuan-I Ho
 import io
 import os
 import cv2
-import pickle
-import math
 import h5py
 import numpy as np
 import PIL.Image as Image
@@ -15,95 +13,16 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 from torchvision import transforms
-from torchvision.transforms import functional as F
 
+from phd.data.splits import TRAIN_SPLITS, VAL_SPLITS, WILD_TRAIN_SPLITS
+from phd.keypoints import SMPL_TO_COCO17 as smpl_to_coco
+from phd.point_stats import load_point_statistics
+from phd.surface_kp import SURFACE_KP
 from phd.utils.geometry import aa_to_rotmat, matrix_to_rotation_6d
 
 
-#CLIP_MEAN = torch.tensor([0.48145466, 0.4578275, 0.40821073])
-#CLIP_STD = torch.tensor([0.26862954, 0.26130258, 0.27577711])
 IMAGE_MEAN= [0.485, 0.456, 0.406]
 IMAGE_STD=  [0.229, 0.224, 0.225]
-SURFACE_KP = [139, 171, 174, 197, 200, 257, 264, 331, 336, 385, 394, 411, 444, 457,
-               463, 589, 606, 625, 720, 809, 828, 834, 860, 880, 888, 909, 915, 921,
-               934, 944, 962, 973, 991, 995, 1009, 1100, 1104, 1119, 1146, 1151, 1170,
-               1182, 1242, 1250, 1279, 1367, 1406, 1409, 1433, 1448, 1463, 1472, 1478,
-               1484, 1528, 1541, 1598, 1607, 1640, 1702, 1719, 1737, 1757, 1791, 1797,
-               1806, 1865, 1907, 1918, 1954, 1976, 2003, 2102, 2134, 2149, 2208, 2229,
-               2260, 2270, 2287, 2292, 2311, 2330, 2423, 2440, 2534, 2551, 2628, 2652,
-               2684, 2724, 2741, 2800, 2840, 2850, 2867, 2955, 2969, 2970, 2988, 2999,
-               3010, 3040, 3051, 3068, 3073, 3076, 3094, 3112, 3116, 3119, 3148, 3159,
-               3161, 3181, 3249, 3287, 3342, 3347, 3389, 3401, 3416, 3438, 3459, 3469,
-               3489, 3496, 3649, 3682, 3687, 3709, 3712, 3768, 3777, 3897, 4078, 4111,
-               4114, 4132, 4150, 4195, 4252, 4295, 4317, 4319, 4336, 4337, 4372, 4393,
-               4399, 4421, 4440, 4464, 4470, 4482, 4495, 4543, 4571, 4575, 4587, 4597,
-               4607, 4608, 4620, 4647, 4656, 4659, 4686, 4689, 4696, 4793, 4794, 4809,
-               4853, 4862, 4933, 4950, 4962, 4967, 4982, 4990, 5041, 5045, 5053, 5094,
-               5210, 5228, 5261, 5290, 5297, 5347, 5395, 5400, 5459, 5503, 5540, 5546,
-               5555, 5592, 5655, 5702, 5722, 5750, 5753, 5776, 5805, 5861, 5888, 5924,
-               5996, 6034, 6066, 6113, 6151, 6201, 6212, 6261, 6310, 6460, 6471, 6473,
-               6476, 6488, 6509, 6525, 6530, 6636, 6716, 6728, 6741, 6766, 6771, 6832,
-               6838, 6864, 6871, 6876, 6883]
-
-smpl_to_openpose = [24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8, 1, 4, 7, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
-smpl_to_coco = [24, 26, 25, 28, 27, 16, 17, 18, 19, 20, 21, 1, 2, 4, 5, 7, 8]
-
-#[0, 16, 15, 18, 17, 5, 2, 6, 3, 7, 4, 12, 9, 13, 10, 14, 11]
-
-
-data_splits = [
-    '20221010_3_1000_batch01hand_6fps',                        
-    '20221010_3-10_500_batch01hand_zoom_suburb_d_6fps',        
-    '20221011_1_250_batch01hand_closeup_suburb_a_6fps',
-    '20221011_1_250_batch01hand_closeup_suburb_b_6fps',
-    '20221011_1_250_batch01hand_closeup_suburb_c_6fps',
-    '20221011_1_250_batch01hand_closeup_suburb_d_6fps',
-    '20221012_1_500_batch01hand_closeup_highSchoolGym_6fps',
-    '20221012_3-10_500_batch01hand_zoom_highSchoolGym_6fps',
-    '20221013_3_250_batch01hand_orbit_bigOffice_6fps',
-    '20221013_3_250_batch01hand_static_bigOffice_6fps',
-    '20221013_3-10_500_batch01hand_static_highSchoolGym_6fps',     
-    '20221014_3_250_batch01hand_orbit_archVizUI3_time15_6fps',    
-    '20221015_3_250_batch01hand_orbit_archVizUI3_time10_6fps',    
-    '20221015_3_250_batch01hand_orbit_archVizUI3_time12_6fps',
-    '20221015_3_250_batch01hand_orbit_archVizUI3_time19_6fps',
-    '20221017_3_1000_batch01hand_6fps',                         
-    '20221018_3-8_250_batch01hand_pitchDown52_stadium_6fps', 
-    '20221018_3-8_250_batch01hand_pitchUp52_stadium_6fps',         
-    '20221019_1_250_highbmihand_closeup_suburb_b_6fps',
-    '20221019_1_250_highbmihand_closeup_suburb_c_6fps',
-    '20221019_3_250_highbmihand_6fps',                             
-    '20221019_3-8_1000_highbmihand_static_suburb_d_6fps',
-    '20221020_3-8_250_highbmihand_zoom_highSchoolGym_a_6fps',
-    '20221022_3_250_batch01handhair_static_bigOffice_30fps',          
-    '20221024_3-10_100_batch01handhair_static_highSchoolGym_30fps',  
-    '20221024_10_100_batch01handhair_zoom_suburb_d_30fps',            
-    # validation set
-    '20221018_3-8_250_batch01hand_6fps',
-    '20221018_3_250_batch01hand_orbit_archVizUI3_time15_6fps',
-    '20221018_1_250_batch01hand_zoom_suburb_b_6fps',
-    '20221019_3-8_250_highbmihand_orbit_stadium_6fps',
-]
-wild_split = [
-    'aic',
-    'coco',
-    'insta1_v1',
-    'insta1_v2',
-    'insta1_v3',
-    'insta2_v1',
-    'insta2_v2',
-    'insta2_v3',
-    'mpii'
-]
-
-data_splits += wild_split
-
-val_splits = [
-    #'20221018_3_250_batch01hand_orbit_archVizUI3_time15_6fps',
-    #'20221011_1_250_batch01hand_closeup_suburb_d_6fps',
-    'coco',
-    '20221019_1_250_highbmihand_closeup_suburb_b_6fps'
-]
 
 def get_transform(center, scale, res, rot=0):
     """Generate transformation matrix."""
@@ -180,13 +99,7 @@ class TrainDiffDataset(Dataset):
         self.dataset_path = args.train_data_dir
         self._init_dataset(self.dataset_path)
 
-        from phd.paths import MEAN_POINTS_PATH
-        with open(MEAN_POINTS_PATH, 'rb') as f:
-            data_dict = pickle.load(f)
-        self.mean_points = torch.from_numpy(data_dict['mean']).float()
-        self.std_points = torch.from_numpy( data_dict['std']).float()
-
-
+        self.mean_points, self.std_points = load_point_statistics()
 
         self.transform= transforms.Compose([
             transforms.Resize((self.img_size, self.img_size), interpolation=transforms.InterpolationMode.BILINEAR),
@@ -235,7 +148,7 @@ class TrainDiffDataset(Dataset):
             self._single_h5 = True
         else:
             # Original layout: directory of subdirs, each with anno_smpl.h5
-            self.h5_lists = val_splits if self.val else data_splits
+            self.h5_lists = VAL_SPLITS if self.val else TRAIN_SPLITS
             self._single_h5 = False
 
         for i, data_split in enumerate(self.h5_lists):
@@ -254,19 +167,6 @@ class TrainDiffDataset(Dataset):
             return os.path.join(self.dataset_path, data_split)
         return os.path.join(self.dataset_path, data_split, 'anno_smpl.h5')
 
-    def _augment_background(self, image, mask, color, clip=False):
-        # Random background
-        if clip:
-            bg_color = (color - IMAGE_MEAN) / IMAGE_STD
-        else:
-            bg_color = (color - 0.5) / 0.5
-
-        bg = torch.ones_like(image) * bg_color.view(3,1,1)
-        _mask = ~(mask.bool()).expand_as(image)
-        image[_mask] = bg[_mask]
-
-        return image
-
     def __getitem__(self, idx: int):
         """Retrieve point sample."""
         if self.initialization_mode is None:
@@ -276,39 +176,6 @@ class TrainDiffDataset(Dataset):
 
         return self._get_h5_data(split_id, image_id)
     
-    def _get_new_center(self, ori_kp, K, bbox):
-    
-        fx, fy = K[0, 0], K[1, 1]
-        cx, cy = K[0, -1], K[1, -1]
-    
-        theta = np.arctan2(ori_kp[0, 0]-cx, fx)
-
-        phi = np.arctan2(ori_kp[0, 1]-cy, fy)
-
-        Ry = np.array([
-                [np.cos(theta), 0, -np.sin(theta)],
-                [0, 1, 0],
-                [np.sin(theta), 0, np.cos(theta)]
-            ])
-
-        Rx = np.array([
-                [1, 0, 0],
-                [0, np.cos(phi), -np.sin(phi)],
-                [0, np.sin(phi), np.cos(phi)]
-            ])
-
-        R = Rx @ Ry
-
-        H = K @ R @ np.linalg.inv(K)
-        
-        bbox_center = np.array([bbox[0], bbox[1], 1])
-        warp_center = bbox_center @ H.T
-        warp_center = warp_center[:2] / warp_center[2]
-
-        return warp_center
-
-
-
     def _crop(self, img, center, scale, res):
         """
         Crop image according to the supplied bounding box.
@@ -335,7 +202,6 @@ class TrainDiffDataset(Dataset):
         except Exception as e:
             print(e)
 
-        #new_img = cv2.resize(new_img, (res[1], res[0]))  # (cols, rows)
         return new_img, ul, br
 
 
@@ -347,10 +213,7 @@ class TrainDiffDataset(Dataset):
         with h5py.File(self._anno_path(split), "r") as f:
             try:
                 bbox = np.array(f['bbox'][image_id])
-                #ori_kp2d = np.array(f['ori_kps'][image_id])
                 K = np.array(f['K'][image_id])
-
-                #rect_center = self._get_new_center(ori_kp2d, K, bbox)
 
                 upleft = np.array([bbox[0], bbox[1]]) - 100 * bbox[2]
                 kp2d =  np.array(f['ori_kps'][image_id]) - upleft[None, ...]
@@ -359,7 +222,7 @@ class TrainDiffDataset(Dataset):
 
                     img_cv2 = cv2.cvtColor(np.array(Image.open(io.BytesIO(f['ori_crop'][image_id]))), cv2.COLOR_RGB2BGR)
 
-                    if split in wild_split:
+                    if split in WILD_TRAIN_SPLITS:
                         img_cv2, _, _ = self._crop(img_cv2, [bbox[0], bbox[1]], bbox[2], (self.img_size, self.img_size))
                         center = kp2d[8, :2] + np.random.normal(0.0, 10, 2)
                     else:
@@ -374,10 +237,6 @@ class TrainDiffDataset(Dataset):
                     matrix_r = cv2.getRotationMatrix2D(center, rot, scale)
                     results = cv2.warpAffine(img_cv2, matrix_r, (img_H, im_W))
                     
-                    #if split in wild_split:
-                    #    results, _, _ = self._crop(results, [center[0], center[1]], bbox[2], (self.img_size, self.img_size))
-                    #    kp2d =  np.array(f['ori_kps'][image_id]) - upleft[None, ...]
-
                     kp2d = np.concatenate([kp2d[:, :2], np.ones((kp2d.shape[0], 1))], axis=-1)
                     
                     kp2d = kp2d @ matrix_r.T
@@ -393,7 +252,7 @@ class TrainDiffDataset(Dataset):
                     orient_rect, _ = cv2.Rodrigues(Rz @ rot_mat)
                     orient_rect = torch.from_numpy(orient_rect).view(-1).float()
                 else:
-                    if split in wild_split:
+                    if split in WILD_TRAIN_SPLITS:
                         img_cv2 = cv2.cvtColor(np.array(Image.open(io.BytesIO(f['ori_crop'][image_id]))), cv2.COLOR_RGB2BGR)
                         img_cv2, _, _ = self._crop(img_cv2, [bbox[0], bbox[1]], bbox[2], (self.img_size, self.img_size))
                         input_image = Image.fromarray(cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB))
@@ -463,28 +322,9 @@ class TrainDiffDataset(Dataset):
                 'gt_pose_6d': gt_pose_6d.float(),
                 'cond_betas': cond_betas.float(),
                 'cond_K': cond_K,
-                #'ori_points': torch.cat([point_V, point_J], dim=0),
                 'points': (torch.cat([point_V, point_J], dim=0) - self.mean_points) / self.std_points,
-                #'kp_2d': kp_2d,
-                #'kp_2d': kp2d,
-                #'heatmap': heatmap  #torch.zeros(17, 64, 48)
                 'heatmap': heatmap,
             }
-
-            '''
-            if self.use_heatmap:
-                with h5py.File(os.path.join(self.dataset_path, data_split, 'kp2d_vit.h5'), "r") as ff:
-                    try:
-                        kp_2d = ff['kp2d'][image_id]
-                        heatmap = ff['heatmap'][image_id]
-                        print(heatmap.shape)
-
-
-                        #data_dict['kp_2d'] = kp_2d
-                        #data_dict['heatmap'] = heatmap
-                    except:
-                        raise ValueError("[Error] Can't read keypint (%s, %s) from h5 dataset" % (data_split, image_id))
-            '''
 
         return data_dict
 

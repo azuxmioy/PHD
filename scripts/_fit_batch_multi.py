@@ -1,16 +1,12 @@
 import torch
-import smplx
-import pickle
 from tqdm import tqdm
 
-from phd.paths import MEAN_POINTS_PATH
+from phd.keypoints import COCO25_HANDS_IDX, SMPL_TO_COCO17, SMPL_TO_OPENPOSE, SMPL_TO_OPENPOSE_HANDS
+from phd.point_stats import load_point_statistics
 from phd.surface_kp import SURFACE_KP
-from phd.utils.geometry import rot6d_to_rotmat, aa_to_rotmat, perspective_projection, matrix_to_rotation_6d, rotation_matrix_to_angle_axis
+from phd.utils.geometry import rot6d_to_rotmat, perspective_projection, matrix_to_rotation_6d
 
-with open(MEAN_POINTS_PATH, 'rb') as f:
-    data_dict = pickle.load(f)
-mean_points = torch.from_numpy(data_dict['mean']).float()
-std_points = torch.from_numpy(data_dict['std']).float()
+mean_points, std_points = load_point_statistics()
 
 W_KP = 1.0
 W_SMOOTH_DEFAULT = 0
@@ -22,22 +18,6 @@ LR_POSE = 1e-3
 
 OPT_ITER_INNER = 100
 
-SMPL_TO_OPENPOSE = [24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8, 1, 4,
-                         7, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
-SMPL_TO_OPENPOSE_HANDS = [22, 35, 36, 37, 38, 23, 39, 40, 41, 42, 43, 44]
-
-SMPL_TO_COCO17 = [24, 26, 25, 28, 27, 16, 17, 18, 19, 20, 21, 1, 2, 4, 5, 7, 8]
-
-lhand_idx = [25, 29, 33, 37, 41, 45]
-rhand_idx = [46, 50, 54, 58, 62, 66]
-#lhand_idx = [25]
-#rhand_idx = [46]
-COCO25_BODY_IDX = list(range(25))
-COCO25_HANDS_IDX =  lhand_idx + rhand_idx
-#COCO25_HANDS_IDX = list(range(25))
-
-#SMPL_neutral = smplx.SMPL(model_path=smpl_model_path(), gender='neutral')
-
 def avg_rot(rot):
     # input [B,...,3,3] --> output [...,3,3]
     rot = rot.mean(dim=0)
@@ -45,30 +25,7 @@ def avg_rot(rot):
     rot = U @ V.transpose(-1, -2)
     return rot
 
-def smoothness_loss(pred_pose_6d: torch.Tensor) -> torch.Tensor:
-    """
-    Loss function for temporal smoothness.
-    Args:
-        pred_pose : Tensor of shape [N, 144] containing the 6D pose of N frames in a video.
-    Returns:
-        torch.Tensor : Total loss value.
-    """
-    pose_diff = ((pred_pose_6d[1:] - pred_pose_6d[:-1]) ** 2).sum(dim=-1)
-    return pose_diff
-
 def get_opt_id(iter, n_iters, keypoint_type='vit17'):
-    '''
-    if iter < n_iters // 4 :
-        opt_smpl_id = list(range(21)) 
-        use_point = True
-    elif iter < n_iters // 2:
-        opt_smpl_id = list(range(21)) 
-        use_point = True
-    elif iter < n_iters // 4 * 3:
-        opt_smpl_id =  list(range(21)) 
-        use_point = True
-    else:
-    '''
     opt_smpl_id = list(range(21)) 
     use_point = True
 
@@ -84,21 +41,6 @@ def get_opt_id(iter, n_iters, keypoint_type='vit17'):
             use_hand = False
 
     elif keypoint_type == 'openpose25':
-        '''
-        if iter < n_iters // 4:
-            joint_idx = [2, 5, 9, 12]
-            #joint_idx = [0, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
-            use_hand = False
-        elif iter < n_iters // 2:
-            joint_idx = [0, 2, 3, 5, 6, 9, 10, 12, 13]
-            use_hand = False
-        elif iter <  n_iters // 4 * 3:
-            joint_idx =  [0, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
-            use_hand = False
-        else:
-            joint_idx = list(range(25))
-            use_hand = True
-        '''
         joint_idx = list(range(25))
         use_hand = True
 
@@ -140,11 +82,6 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
     ])
     optimizer_smpl = torch.optim.Adam(opt_params, betas=(0.9, 0.999), amsgrad=True)
 
-    scheduler_smpl = torch.optim.lr_scheduler.MultiStepLR(
-                        optimizer_smpl,
-                        milestones=[200],
-                        gamma=0.5)
-        
     if getattr(args, 'n_iter', None) is not None:
         n_iter = args.n_iter
     else:
@@ -207,14 +144,9 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
             body_2d = joints_2d[:, SMPL_TO_OPENPOSE]
             hand_2d = joints_2d[:, SMPL_TO_OPENPOSE_HANDS]
 
-        #conf_body_kps = gt_joints_2d[:, opt_idx, 2]
-
         gt_body_kps = gt_joints_2d[:, joint_idx, :2]
         pred_body_kps = body_2d [:, joint_idx, :2]
         conf = gt_joints_2d[:, joint_idx, 2:]
-
-        #joints_openpose = (joints_2d + 0.5) * WIDTH + torch.tensor([0, 130], device=joints_2d.device)
-        #joints_normalized = joints_openpose[:, opt_idx] / WIDTH
 
         # Optional GMoF-robust 2D keypoint residual (sigma in image pixels).
         # When args.gmof_sigma > 0, replace L2 by sigma^2 * d^2 / (sigma^2 + d^2),
@@ -345,12 +277,11 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
             # extract fitted points for next round of denoising
             fitted_points = torch.cat([smpl_V[:, SURFACE_KP], SMPL_J], dim= 1).clone().detach()
             points_norm = (fitted_points - mean_points[None, ...].to(fitted_points.device)) / std_points[None, ...].to(fitted_points.device)
-            #rot_aa = rotation_matrix_to_angle_axis(torch.cat([orient_rotmat, body_pose_rotmat], dim=1).view(-1, 3, 3)).reshape(batch_size, 72)
 
             # Samping 3D observation
             if i % 10 == 0:
-                with torch.autocast(device_type="cuda"):
-                    diff_points, _, output_dict = pipeline(data,
+                with torch.autocast(device_type=opt_cam.device.type, enabled=opt_cam.device.type == "cuda"):
+                    diff_points, _, _ = pipeline(data,
                     args,
                     num_images_per_prompt = n_sample,  # pipeline multiplies by B_in internally
                     num_inference_steps=args.num_inference_steps,
@@ -362,15 +293,9 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
                     begin_index=2
                 )
                 pred_points = mean_points[None, ...].to(diff_points.device) + diff_points.detach() * std_points[None, ...].to(diff_points.device)
-                #pred_points = pred_points @ init_params['cam_R_inv'].T.unsqueeze(0)
                 sample_surface_kp = pred_points[:, :len(SURFACE_KP)].detach()
                 sample_joints = pred_points[:, len(SURFACE_KP):len(SURFACE_KP)+24].detach()
                 sample_pelvis = sample_joints[:, [0], :]
-                #it_res = fitter.fit_with_known_shape(shape.repeat(batch_size *8, 1), sample_surface_kp, sample_joints, n_iter=3)
-                #fit_res = fitter.fit(sample_surface_kp, sample_joints, n_iter=3, beta_regularizer=1, initial_shape_betas=shape.repeat(sample_surface_kp.shape[0], 1))
-
-                #fit_pose_rotmat = matrix_to_rotation_6d(aa_to_rotmat(fit_res['pose_rotvecs'].view(-1, 3))).reshape(sample_surface_kp.shape[0], -1, 6).detach()
-            #point_loss = torch.norm(fit_pose_rotmat[:, 1:, :] - opt_poses, dim=2).mean(dim=[0,1])
             if per_frame_loss:
                 # sum over batch, mean over joints/verts (per-frame gradient magnitude)
                 point_loss = (torch.norm((SMPL_J[:, :24]-pred_pelvis) - (sample_joints-sample_pelvis), dim=2)).mean(dim=1).sum() / n_sample + \
@@ -394,7 +319,6 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
 
         total_loss.backward()
         optimizer_smpl.step()
-        #scheduler_smpl.step(total_loss)
     
     smpl_Vs.append(smpl_output.vertices.clone().detach())
 
@@ -418,8 +342,3 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
     }
 
     return output_dict
-
-
-
-
-

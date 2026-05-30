@@ -13,7 +13,6 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from diffusers.training_utils import free_memory, compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
-from accelerate.utils import  set_seed
 
 
 from datetime import datetime, timedelta
@@ -37,7 +36,9 @@ import transformers
 from phd.data.dataset import TrainDiffDataset
 from phd.data.test_dataset import TestDiffDataset
 from phd.data.config import parse_options, argparse_to_str
-from phd.inference import create_backbone, load_point_statistics
+from phd.inference import create_backbone
+from phd.point_stats import load_point_statistics
+from phd.surface_kp import SURFACE_KP
 from phd.models.pose_dit import PoseDiTTransformer2DModel
 from phd.models.pipeline import PoseDiTPipeline
 from phd.utils.geometry import rot6d_to_rotmat
@@ -52,13 +53,7 @@ from phd.paths import (
 os.environ.setdefault('DATA_ROOT', smplfitter_data_root())
 mean_points, std_points = load_point_statistics()
 
-#from lib.test_diffusion_dataset import TestDiffDataset
-#from lib.ccprojection import CCProjection
-#from lib.utils import clip_encode_image_local, test_pipeline, log_validation
-
 check_min_version("0.24.0")
-
-subset = [139, 171, 174, 197, 200, 257, 264, 331, 336, 385, 394, 411, 444, 457, 463, 589, 606, 625, 720, 809, 828, 834, 860, 880, 888, 909, 915, 921, 934, 944, 962, 973, 991, 995, 1009, 1100, 1104, 1119, 1146, 1151, 1170, 1182, 1242, 1250, 1279, 1367, 1406, 1409, 1433, 1448, 1463, 1472, 1478, 1484, 1528, 1541, 1598, 1607, 1640, 1702, 1719, 1737, 1757, 1791, 1797, 1806, 1865, 1907, 1918, 1954, 1976, 2003, 2102, 2134, 2149, 2208, 2229, 2260, 2270, 2287, 2292, 2311, 2330, 2423, 2440, 2534, 2551, 2628, 2652, 2684, 2724, 2741, 2800, 2840, 2850, 2867, 2955, 2969, 2970, 2988, 2999, 3010, 3040, 3051, 3068, 3073, 3076, 3094, 3112, 3116, 3119, 3148, 3159, 3161, 3181, 3249, 3287, 3342, 3347, 3389, 3401, 3416, 3438, 3459, 3469, 3489, 3496, 3649, 3682, 3687, 3709, 3712, 3768, 3777, 3897, 4078, 4111, 4114, 4132, 4150, 4195, 4252, 4295, 4317, 4319, 4336, 4337, 4372, 4393, 4399, 4421, 4440, 4464, 4470, 4482, 4495, 4543, 4571, 4575, 4587, 4597, 4607, 4608, 4620, 4647, 4656, 4659, 4686, 4689, 4696, 4793, 4794, 4809, 4853, 4862, 4933, 4950, 4962, 4967, 4982, 4990, 5041, 5045, 5053, 5094, 5210, 5228, 5261, 5290, 5297, 5347, 5395, 5400, 5459, 5503, 5540, 5546, 5555, 5592, 5655, 5702, 5722, 5750, 5753, 5776, 5805, 5861, 5888, 5924, 5996, 6034, 6066, 6113, 6151, 6201, 6212, 6261, 6310, 6460, 6471, 6473, 6476, 6488, 6509, 6525, 6530, 6636, 6716, 6728, 6741, 6766, 6771, 6832, 6838, 6864, 6871, 6876, 6883]
 
 logger = get_logger(__name__)
 
@@ -128,7 +123,7 @@ def log_validation(logger, val_dataloader, backbone, head, dit, scheduler,
         if i >=args.num_validation_images and mode == 'val':
             break
 
-        with torch.autocast("cuda"):
+        with torch.autocast(device_type=accelerator.device.type, enabled=accelerator.device.type == "cuda"):
             poses, heatmap = pipeline(data,
                         args,
                         num_images_per_prompt = args.num_gen_images,
@@ -157,25 +152,15 @@ def log_validation(logger, val_dataloader, backbone, head, dit, scheduler,
         if args.use_vertices:
             fitter = fitter.to(poses.device)
             pred_points = mean_points[None, ...].to(poses.device) + poses.detach() * std_points[None, ...].to(poses.device)
-            #pred_points = torch.from_numpy(mean_points)[None, ...].to(poses.device) + poses.detach()
-            surface_kp = pred_points[:, :len(subset)]
-            joints = pred_points[:, len(subset):len(subset)+24 ]
+            surface_kp = pred_points[:, :len(SURFACE_KP)]
+            joints = pred_points[:, len(SURFACE_KP):len(SURFACE_KP)+24 ]
             fit_res = fitter.fit(surface_kp, joints, n_iter=3, beta_regularizer=1)
-            #fit_res = fitter.fit(surface_kp, joints, n_iter=3, beta_regularizer=1, initial_shape_betas=betas.repeat(surface_kp.shape[0], 1))
 
 
         render_samples = []
         for j in range(args.num_gen_images):
             
             if args.use_vertices:
-                #offset_V = poses[j].detach().cpu().numpy()
-                #sample_smpl_V = mean_points + offset_V
-                # draw vertices on the canvus
-                #canvus = np.zeros((256, 256, 3), dtype=np.uint8)
-                #for v in sample_smpl_V:
-                #    cv2.circle(canvus, (int( v[0]*128+128), int((v[1]*-128)+128)), 2, (255, 0, 0), -1)
-                #render_samples.append(canvus.astype(np.float32) / 255.)
-
                 sample_smpl_V = body_model( global_orient=fit_res['pose_rotvecs'][j, :3].unsqueeze(0),
                                         body_pose=fit_res['pose_rotvecs'][j, 3:].unsqueeze(0),
                                         betas=fit_res['shape_betas'][j].unsqueeze(0),
@@ -348,11 +333,8 @@ def main(args, args_str):
     renderer = Renderer(body_model.faces)
 
     fitter_model = SMPLBodyModel('smpl', 'neutral')  # create the body model to be fitted
-    fitter = SMPLFitter(fitter_model, num_betas=10, vertex_subset=subset)  # create the fitter
+    fitter = SMPLFitter(fitter_model, num_betas=10, vertex_subset=SURFACE_KP)  # create the fitter
 
-    # Load scheduler and models
-    #noise_scheduler = DDPMScheduler.from_config('scheduler.yaml')
-    #mean_points = train_dataset.mean_point.cpu().numpy()
     from phd.paths import SCHEDULER_FLOW_YAML
     noise_scheduler = FlowMatchEulerDiscreteScheduler.from_config(str(SCHEDULER_FLOW_YAML))
     noise_scheduler_copy = copy.deepcopy(noise_scheduler)
@@ -365,20 +347,6 @@ def main(args, args_str):
         print('pretrained_model_not_found')
         dit = PoseDiTTransformer2DModel(num_joints=n_joints, in_channels=in_channels, use_heatmap=args.use_heatmap)
     backbone, head = create_backbone()
-    #vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae")
-    #unet = UNet2DConditionModel.from_pretrained(
-    #    args.pretrained_model_name_or_path, subfolder="unet")
-    #unet_input_channel = unet.config.in_channels
-    #clip_image_encoder = CLIPVisionModelWithProjection.from_pretrained('kxic/zero123-xl', subfolder="image_encoder")
-    #refer_clip_proj = CCProjection(clip_image_encoder)
-
-    #logger.info("Initializing controlnet weights from unet")
-
-    #controlnet = ControlNetModel.from_unet(unet, conditioning_channels=args.conditioning_channels)
-
-    #if args.pretrained_model_name_or_path != 'kxic/zero123-xl':
-    #    controlnet = ControlNetModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="controlnet")
-    #    refer_clip_proj = CCProjection.from_pretrained(args.pretrained_model_name_or_path, subfolder="projection", clip_image_encoder=clip_image_encoder)
 
     # `accelerate` 0.16.0 will have better support for customized saving
     if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
@@ -402,9 +370,6 @@ def main(args, args_str):
                 model = models.pop()
                 if isinstance(model, PoseDiTTransformer2DModel):
                     load_model = PoseDiTTransformer2DModel.from_pretrained(input_dir, subfolder="transformer")
-                #else:
-                #    load_model = torch.load(os.path.join(input_dir, 'model.pth'))
-                # load diffusers style into model
                     model.register_to_config(**load_model.config)
                     model.load_state_dict(load_model.state_dict())
                     del load_model
@@ -412,9 +377,6 @@ def main(args, args_str):
         accelerator.register_save_state_pre_hook(save_model_hook)
         accelerator.register_load_state_pre_hook(load_model_hook)
 
-
-    ## Freeze the weights of the vae, unet and text_encoder
-    ## Only train the controlnet and the transformer blocks in the unet
 
     dit.train()
 
@@ -448,14 +410,6 @@ def main(args, args_str):
     params_to_optimize.append({'params': dit.parameters(),
                                 'lr': args.lr * scale,
                                 })
-    #params_to_optimize.append({'params': refer_clip_proj.parameters(),
-    #                            'lr': args.lr * scale,
-    #                            'weight_decay': args.adam_weight_decay})    
-    #params_to_optimize.append({'params': unet.parameters(),
-    #                            'lr': args.lr * scale,
-    #                            'weight_decay': args.adam_weight_decay})        
-    
-    #params_to_optimize = controlnet.parameters()
     optimizer = optimizer_class(
         params_to_optimize,
         betas=(args.adam_beta1, args.adam_beta2),
@@ -488,14 +442,9 @@ def main(args, args_str):
         backbone, head, dit, optimizer, train_dataloader, lr_scheduler
     )
 
-    # For mixed precision training we cast the text_encoder and vae weights to half-precision
-    # as these models are only used for inference, keeping weights in full precision is not required.
     weight_dtype = torch.float32
 
-    # Move vae, unet and text_encoder to device and cast to weight_dtype
     dit.to(accelerator.device, dtype=weight_dtype)
-    #unet.to(accelerator.device, dtype=weight_dtype)
-    #clip_image_encoder.to(accelerator.device, dtype=weight_dtype)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -514,9 +463,6 @@ def main(args, args_str):
         tracker_config = dict(vars(args))
 
         # tensorboard cannot handle list types for config
-        #init_kwargs = {"wandb": {'name': os.path.basename(logging_dir), 'dir': logging_dir}}
-        #init_kwargs = {"tensorboard": {'log_dir': logging_dir}}
-
         accelerator.init_trackers(args.exp_name, config=tracker_config)
 
         for tracker in accelerator.trackers:
@@ -583,11 +529,6 @@ def main(args, args_str):
     for epoch in range(first_epoch, args.num_train_epochs):
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(dit):
-
-                # Convert images to latent space
-                #latents = vae.encode(batch["tgt_image"].to(dtype=weight_dtype)).latent_dist.sample()
-                #latents = latents * vae.config.scaling_factor
-
                 gt_pose = batch['points'] if args.use_vertices else batch["gt_pose_6d"] 
 
                 # Sample noise that we'll add to the latents
@@ -619,75 +560,15 @@ def main(args, args_str):
                     vit_feature = backbone(src_img)  # (B, 1280, 16, 16)
                     img_tokens = vit_feature.view(bsz, 1280, -1).permute(0, 2, 1).detach()
                     heatmap = None
-                    # pose-betas pretraining
-                    zeros_token = torch.zeros_like(img_tokens)
 
                     if args.use_heatmap:
                         heatmap = head(vit_feature)      # (B, 17, 64, 64)
                         heatmap = heatmap.detach()
-                        #print(img_tokens.shape)
-                        #heatmap = batch['heatmap'] if args.use_heatmap else None
                 betas = batch['cond_betas'].to(img_tokens.device)
-
-                # Sample a random timestep for each image
-                #timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=gt_pose.device)
-                #timesteps = timesteps.long()
-                # Add noise to the latents according to the noise magnitude at each timestep
-                # (this is the forward diffusion process)
-                #noisy_poses = noise_scheduler.add_noise(gt_pose, noise, timesteps)
-
-                # Get the text embedding for conditioning
-                # encoder_hidden_states = text_encoder(batch["input_ids"])[0]
-                #controlnet_image = batch["conditioning_pixel_values"].to(dtype=weight_dtype)
-
-                #src_img = batch["src_image"]
-                #cond_img = batch["src_ori_image"]
-                #if args.drop_prob > 0:
-                #    p = random.random()
-                #    if p <= args.drop_prob: # dropout ref image
-                #        src_img = torch.zeros_like(src_img)
-                #        cond_img = torch.zeros_like(cond_img)
-
-                #img_latents = vae.encode(cond_img.to(dtype=weight_dtype)).latent_dist.mode()
-                #img_latents = img_latents * vae.config.scaling_factor
-
-                #encoder_hidden_states = clip_encode_image_local(src_img, clip_image_encoder, refer_clip_proj)
-
-                #if args.conditioning_channels == 8:
-                #    controlnet_image = torch.cat([batch['tgt_uv'], batch['view_cond'], batch['tgt_mask']], dim=1)
-                #elif args.conditioning_channels == 4:
-                #    controlnet_image = torch.cat([batch['tgt_uv'], batch['tgt_mask']], dim=1)
-                #else:
-                #    controlnet_image = batch['tgt_mask']
-
-                #if unet_input_channel == 8:
-                #    noisy_latents = torch.cat([noisy_latents, img_latents], dim=1)
-
-                #down_block_res_samples, mid_block_res_sample = controlnet(
-                #    noisy_latents,
-                #    timesteps,
-                #    encoder_hidden_states=encoder_hidden_states,
-                #    controlnet_cond=controlnet_image,
-                #    conditioning_scale=args.conditioning_scale,
-                #    return_dict=False,
-                #)
-
-                # Predict the noise residual
-                #model_pred = unet(
-                #    noisy_latents,
-                #    timesteps,
-                #    encoder_hidden_states=encoder_hidden_states,
-                #    down_block_additional_residuals=[
-                #        sample.to(dtype=weight_dtype) for sample in down_block_res_samples
-                #    ],
-                #    mid_block_additional_residual=mid_block_res_sample.to(dtype=weight_dtype),
-                #).sample
-                #print(timesteps.shape)
 
                 model_pred = dit(
                     noisy_poses,
                     img_tokens,
-                    #zeros_token,
                     timesteps,
                     class_labels=betas,
                     heatmap=heatmap
@@ -704,14 +585,6 @@ def main(args, args_str):
                     target = gt_pose
                 else:
                     target = noise - gt_pose
-                # Get the target for loss depending on the prediction type
-                #if noise_scheduler.config.prediction_type == "epsilon":
-                #    target = noise
-                #elif noise_scheduler.config.prediction_type == "v_prediction":
-                #    target = noise_scheduler.get_velocity(gt_pose, noise, timesteps)
-                #else:
-                #    raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
-                #loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
                 # Compute regular loss.
                 loss = torch.mean(
                     (weighting.float() * (model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1),

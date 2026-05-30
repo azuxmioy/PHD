@@ -21,9 +21,9 @@ from phd.inference import (
     find_cam_pos,
     find_image_path,
     load_openpose_json,
-    load_point_statistics,
     overlay_rgba,
 )
+from phd.point_stats import load_point_statistics
 from phd.utils.geometry import aa_to_rotmat
 from phd.utils.renderer import Renderer
 from phd.surface_kp import SURFACE_KP
@@ -105,9 +105,9 @@ def main(args):
         data['cond_betas']   = torch.from_numpy(fit_betas).view(1, -1).float().to(device)
 
 
-        with torch.autocast(device_type="cuda"):
+        with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
                     
-            poses, _, output_dict = pipeline(data,
+            poses, _, _ = pipeline(data,
                         args,
                         num_images_per_prompt = args.num_validation_images,
                         num_inference_steps=args.num_inference_steps,

@@ -30,6 +30,7 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 
+from phd.keypoints import SMPL_TO_OPENPOSE
 from phd.paths import smpl_model_path
 from phd.utils.geometry import (
     rotation_matrix_to_angle_axis,
@@ -40,9 +41,6 @@ from phd.utils.geometry import (
 W_REG = 5.0
 W_SMOOTH = 20.0
 W_KP2D = 5.0
-
-SMPL_TO_OPENPOSE = [24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8, 1, 4,
-                    7, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
 
 
 def gmof(x, sigma):

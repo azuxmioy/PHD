@@ -4,7 +4,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import pickle
 import re
 from collections import OrderedDict
 from pathlib import Path
@@ -17,13 +16,16 @@ from diffusers import FlowMatchEulerDiscreteScheduler
 from PIL import Image
 from torchvision import transforms
 
+from phd.camera import find_cam_pos
 from phd.fitter.pt.bodymodel import SMPLBodyModel
 from phd.fitter.pt.fitter import SMPLFitter
+from phd.keypoints import SMPL_TO_COCO17, SMPL_TO_OPENPOSE, SMPL_TO_OPENPOSE_HANDS
 from phd.models.heatmap_head import head
 from phd.models.pipeline import PoseDiTPipeline
 from phd.models.pose_dit import PoseDiTTransformer2DModel
 from phd.models.vit import vit
-from phd.paths import CHECKPOINTS_DIR, MEAN_POINTS_PATH, SCHEDULER_FLOW_YAML
+from phd.paths import CHECKPOINTS_DIR, SCHEDULER_FLOW_YAML
+from phd.point_stats import load_point_statistics
 from phd.surface_kp import SURFACE_KP
 
 LIGHT_BLUE = (0.65098039, 0.74117647, 0.85882353)
@@ -33,29 +35,6 @@ IMAGE_TRANSFORM = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize(mean=IMAGE_MEAN, std=IMAGE_STD),
 ])
-
-SMPL_TO_OPENPOSE = [
-    24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8, 1, 4,
-    7, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
-]
-SMPL_TO_COCO17 = [24, 26, 25, 28, 27, 16, 17, 18, 19, 20, 21, 1, 2, 4, 5, 7, 8]
-SMPL_TO_OPENPOSE_HANDS = [22, 35, 36, 37, 38, 23, 39, 40, 41, 42, 43, 44]
-
-_POINT_STATS: tuple[torch.Tensor, torch.Tensor] | None = None
-
-
-def load_point_statistics() -> tuple[torch.Tensor, torch.Tensor]:
-    """Load the normalized PointDiT mean/std point cloud tensors."""
-    global _POINT_STATS
-    if _POINT_STATS is None:
-        with open(MEAN_POINTS_PATH, "rb") as f:
-            data = pickle.load(f)
-        _POINT_STATS = (
-            torch.from_numpy(data["mean"]).float(),
-            torch.from_numpy(data["std"]).float(),
-        )
-    return _POINT_STATS
-
 
 def load_openpose_json(json_path: str | Path, thres: float = 0.05) -> np.ndarray:
     """Load OpenPose-135 keypoints and zero-out low-confidence detections."""
@@ -98,34 +77,6 @@ def overlay_rgba(background: np.ndarray, rgba: np.ndarray) -> np.ndarray:
     alpha = rgba[..., 3:]
     out = bg[..., :3] * (1.0 - alpha) + rgba[..., :3] * alpha
     return (out * 255.0).clip(0, 255).astype(np.uint8)
-
-
-def find_cam_pos(P3d: torch.Tensor, P2d: torch.Tensor, K: Any) -> torch.Tensor:
-    """Weighted least-squares camera translation from 3D joints and 2D keypoints."""
-    P2d = P2d.to(device=P3d.device, dtype=P3d.dtype)
-    K = torch.as_tensor(K, device=P3d.device, dtype=P3d.dtype)
-    batch_size, n_joint, _ = P3d.shape
-
-    fx, s, cx = K[0]
-    _, fy, cy = K[1]
-    X, Y, Z = P3d[:, :, 0], P3d[:, :, 1], P3d[:, :, 2]
-    U, V = P2d[:, :, 0], P2d[:, :, 1]
-
-    left = torch.zeros((batch_size, n_joint, 2, 3), device=P3d.device, dtype=P3d.dtype)
-    left[:, :, 0, 0] = fx
-    left[:, :, 0, 1] = s
-    left[:, :, 0, 2] = cx - U
-    left[:, :, 1, 1] = fy
-    left[:, :, 1, 2] = cy - V
-
-    right = torch.zeros((batch_size, n_joint, 2), device=P3d.device, dtype=P3d.dtype)
-    right[:, :, 0] = fx * X + s * Y + cx * Z - U * Z
-    right[:, :, 1] = fy * Y + cy * Z - V * Z
-
-    A = left.reshape((batch_size, -1, 3))
-    B = right.reshape((batch_size, -1, 1))
-    W = torch.sqrt(P2d[:, :, 2:].clamp(min=0)).repeat(1, 1, 2).reshape((batch_size, -1, 1))
-    return torch.linalg.lstsq(A * W, B * W).solution.view(batch_size, -1).detach()
 
 
 def load_torch_checkpoint(path: str | Path) -> dict[str, Any]:

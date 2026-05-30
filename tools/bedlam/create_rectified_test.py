@@ -6,15 +6,17 @@ import smplx
 import torch
 from PIL import Image
 
+from phd.paths import smpl_model_path
+
 output_folder = 'bedlam_v1'
-data_splits = [
+DATA_SPLITS = [
 
     '20221010_3-10_500_batch01hand_zoom_suburb_d_6fps'
 
 ]
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-body_model = smplx.SMPL(model_path='/mnt/users_scratch/hohs/body_models/smpl', gender='neutral').to(device)
+body_model = smplx.SMPL(model_path=smpl_model_path(), gender='neutral').to(device)
 
 
 def get_transform(center, scale, res, rot=0):
@@ -136,7 +138,7 @@ def rectify_images(img, bbox, K, kps):
     return rectified_image, im_crop, R, ori_crop
 
 
-for split in data_splits:
+for split in DATA_SPLITS:
 
     os.makedirs(os.path.join(output_folder, split), exist_ok=True)
 

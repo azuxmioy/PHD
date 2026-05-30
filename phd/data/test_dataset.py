@@ -1,13 +1,10 @@
 """
 Copyright (C) 2024  ETH Zurich, Hsuan-I Ho
 """
-import io
 import os
 import json
-import h5py
 import pickle
 import PIL.Image as Image
-import numpy as np
 
 import torch
 from torch.utils.data import Dataset
@@ -16,33 +13,10 @@ from torchvision import transforms
 from phd.utils.geometry import aa_to_rotmat, matrix_to_rotation_6d
 
 
-#CLIP_MEAN = torch.tensor([0.48145466, 0.4578275, 0.40821073])
-#CLIP_STD = torch.tensor([0.26862954, 0.26130258, 0.27577711])
 IMAGE_MEAN= [0.485, 0.456, 0.406]
 IMAGE_STD=  [0.229, 0.224, 0.225]
 
-
-
-test_splits = [
-    #'P1/14_outdoor_climb',
-    #'P2/23_outdoor_hug_tree',
-    #'P3/31_outdoor_workout',
-    #'P3/32_outdoor_soccer_warmup_a',
-    #'P3/33_outdoor_soccer_warmup_b',
-    #'P5/42_indoor_dancing',
-    #'P5/44_indoor_rom',
-    #'P6/49_outdoor_big_stairs_down',
-    #'P6/50_outdoor_workout',
-    #'P6/51_outdoor_dancing',
-    #'P7/57_outdoor_rock_chair',
-    #'P7/59_outdoor_rom',
-    #'P7/60_outdoor_workout',
-    #'P8/64_outdoor_skateboard',
-    #'P8/68_outdoor_handstand',
-    #'P8/69_outdoor_cartwheel',
-    #'P9/76_outdoor_sitting',
-    'test/tpose'
-]
+DEFAULT_TEST_SPLITS = ["test/tpose"]
 
 class TestDiffDataset(Dataset):
     def __init__(self, args):
@@ -65,15 +39,12 @@ class TestDiffDataset(Dataset):
         """Initializes the dataset from a h5 file.
            copy smpl_v from h5 file.
         """
-        #self.h5_lists = [ x for x in sorted(os.listdir(dataset_path)) if os.path.isdir(os.path.join(dataset_path, x))]
-
         self.bbox_list = []
         self.full_img_list = []
         self.rect_img_list = []
         self.smpl_cam_list = []
-        self.pred_kp_list = []
 
-        for i, data_split in enumerate(test_splits):
+        for data_split in DEFAULT_TEST_SPLITS:
             
             self.bbox_list.extend([os.path.join(self.dataset_path, data_split, 'bbox', x)
                                     for x in sorted(os.listdir(os.path.join(self.dataset_path, data_split, 'bbox'))) if x.endswith('json')])
@@ -83,32 +54,9 @@ class TestDiffDataset(Dataset):
                                          for x in sorted(os.listdir(os.path.join(self.dataset_path, data_split, 'cropped_rect'))) if x.endswith(('png', 'jpg'))])
             self.smpl_cam_list.extend( [os.path.join(self.dataset_path, data_split, 'smpl_cam', x)
                                          for x in sorted(os.listdir(os.path.join(self.dataset_path, data_split, 'smpl_cam'))) if x.endswith(('pkl'))])
-            self.pred_kp_list.extend( [os.path.join(self.dataset_path, data_split, 'vit_pred', x)
-                                         for x in sorted(os.listdir(os.path.join(self.dataset_path, data_split, 'vit_pred'))) if x.endswith(('npy'))])    
-        print(len(self.bbox_list))
-
-    def _augment_background(self, image, mask, color, clip=False):
-        # Random background
-        if clip:
-            bg_color = (color - IMAGE_MEAN) / IMAGE_STD
-        else:
-            bg_color = (color - 0.5) / 0.5
-
-        bg = torch.ones_like(image) * bg_color.view(3,1,1)
-        _mask = ~(mask.bool()).expand_as(image)
-        image[_mask] = bg[_mask]
-
-        return image
 
     def __getitem__(self, idx: int):
         """Retrieve point sample."""
-        
-        #pil_img = Image.open(self.rect_img_list[idx])
-
-        #res = Image.new(pil_img.mode, (342, 342), (0,0,0))
-        #res.paste(pil_img, (43, 43))
-        #input_image = res.resize((256, 256),
-        #        resample= Image.Resampling.LANCZOS.LANCZOS)
         input_image = Image.open(self.rect_img_list[idx])
 
         input_tensor = self.transform(input_image)
@@ -134,14 +82,6 @@ class TestDiffDataset(Dataset):
 
         kp2d = torch.zeros(17, 3)
         heatmap = torch.zeros(17, 64, 64)
-        '''
-        try:
-            pred_dict = np.load(self.pred_kp_list[idx], allow_pickle=True).tolist()
-            kp2d = torch.from_numpy(pred_dict['kp2d'])
-            heatmap = torch.from_numpy(pred_dict['heatmap'])
-        except:
-            print('keypoint data not found!!!')
-        '''
 
         return {
             'input_tensor': input_tensor,

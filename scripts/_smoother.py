@@ -17,14 +17,14 @@ import pickle
 import torch
 from tqdm import tqdm
 import smplx
+from phd.keypoints import SMPL_TO_OPENPOSE
 from phd.utils.renderer import Renderer
 from phd.utils.geometry import rotation_matrix_to_angle_axis, perspective_projection
 from phd.paths import smpl_model_path
 W_REG = 5
 W_SMOOTH = 20
 W_KP2D = 5
-SMPL_TO_OPENPOSE = [24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8, 1, 4,
-                         7, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
+
 def gmof(x, sigma):
     """
     Geman-McClure error function

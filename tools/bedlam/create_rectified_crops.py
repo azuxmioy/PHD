@@ -1,51 +1,13 @@
 import os
 import cv2
 import numpy as np
-import trimesh
-import smplx
-import torch
-from PIL import Image
 from tqdm import tqdm
 import h5py
 
+from phd.data.splits import BEDLAM_TRAIN_SPLITS
 
 output_folder = 'bedlam_v2_h5_full'
-data_splits = [
-    #'20221010_3_1000_batch01hand_6fps',                -                     
-    #'20221010_3-10_500_batch01hand_zoom_suburb_d_6fps',     -   
-    #'20221011_1_250_batch01hand_closeup_suburb_a_6fps', -
-    #'20221011_1_250_batch01hand_closeup_suburb_b_6fps', -
-    #'20221011_1_250_batch01hand_closeup_suburb_c_6fps', -
-    #'20221011_1_250_batch01hand_closeup_suburb_d_6fps', -
-    #'20221012_1_500_batch01hand_closeup_highSchoolGym_6fps',  -
-    #'20221012_3-10_500_batch01hand_zoom_highSchoolGym_6fps',  -
-    #'20221013_3_250_batch01hand_orbit_bigOffice_6fps',      - 
-    #'20221013_3_250_batch01hand_static_bigOffice_6fps',     -
-    #'20221013_3-10_500_batch01hand_static_highSchoolGym_6fps',   -
-    #'20221014_3_250_batch01hand_orbit_archVizUI3_time15_6fps',   -    
-    #'20221015_3_250_batch01hand_orbit_archVizUI3_time10_6fps',   -
-    #'20221015_3_250_batch01hand_orbit_archVizUI3_time12_6fps',   -
-    #'20221015_3_250_batch01hand_orbit_archVizUI3_time19_6fps',   -
-    #'20221017_3_1000_batch01hand_6fps',                          -
-    #'20221018_3-8_250_batch01hand_pitchDown52_stadium_6fps',     -
-    #'20221018_3-8_250_batch01hand_pitchUp52_stadium_6fps',       -
-    #'20221019_1_250_highbmihand_closeup_suburb_b_6fps', -
-    #'20221019_1_250_highbmihand_closeup_suburb_c_6fps', -
-    #'20221019_3_250_highbmihand_6fps',                         -   
-    #'20221019_3-8_1000_highbmihand_static_suburb_d_6fps',      # tmux 0
-    #'20221020_3-8_250_highbmihand_zoom_highSchoolGym_a_6fps',    -
-    #'20221022_3_250_batch01handhair_static_bigOffice_30fps',      - 
-    #'20221024_3-10_100_batch01handhair_static_highSchoolGym_30fps',   -
-    #'20221024_10_100_batch01handhair_zoom_suburb_d_30fps',       -   
-    # validation set
-    #'20221018_3-8_250_batch01hand_6fps',                        -
-    #'20221018_3_250_batch01hand_orbit_archVizUI3_time15_6fps', -
-    #'20221018_1_250_batch01hand_zoom_suburb_b_6fps'            -
-    #'20221019_3-8_250_highbmihand_orbit_stadium_6fps'          -
-]
-
-device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-body_model = smplx.SMPL(model_path='/mnt/users_scratch/hohs/body_models/smpl', gender='neutral').to(device)
+DATA_SPLITS = BEDLAM_TRAIN_SPLITS
 dt = h5py.special_dtype(vlen=np.uint8)
 
 
@@ -122,13 +84,9 @@ def crop(img, center, scale, res):
 def rectify_images(img, bbox, K, kps):
 
     h, w, c = img.shape
-    cx, cy = w / 2, h / 2 
 
     fx, fy = K[0, 0], K[1, 1]
     cx, cy = K[0, -1], K[1, -1]
-
-    tanX = (bbox[0]) / cx
-    tanY = (bbox[1]) / cy
 
     theta = np.arctan2(kps[0, 0]-cx, fx)
 
@@ -157,15 +115,7 @@ def rectify_images(img, bbox, K, kps):
     warp_kp = kps @ H.T
     warp_kp = warp_kp[..., :2] / warp_kp[..., 2:]
 
-    #print(warp_center)
-
     rectified_image = cv2.warpPerspective(img, H, (w, h))
-    #rectified_image = cv2.rectangle(rectified_image, (int(warp_center[0] - bbox[2]*100), int(warp_center[1] - bbox[2]*100)),
-    #                                (int(warp_center[0] + bbox[2]*100), int(warp_center[1] + bbox[2]*100)), (0, 0, 255), 2)
-
-    #cv2.circle(rectified_image, (int(warp_center[0]), int(warp_center[1])), 3, (0, 0, 255), -1)
-    #for v in warp_kp:
-    #    cv2.circle(rectified_image, (int(v[0]), int(v[1])), 3, (0, 0, 255), -1)
 
     ori_crop, _, _ = crop(img, [bbox[0], bbox[1]], bbox[2], (256, 256))
     im_crop, _, _ = crop(rectified_image, [warp_center[0], warp_center[1]], bbox[2], (256, 256))
@@ -173,10 +123,9 @@ def rectify_images(img, bbox, K, kps):
     return rectified_image, im_crop, R, ori_crop, warp_kp
 
 
-for split in data_splits:
+for split in DATA_SPLITS:
 
-    os.makedirs(os.path.join(output_folder, split, 'rect_img'), exist_ok=True)
-    os.makedirs(os.path.join(output_folder, split, 'crop_img'), exist_ok=True)
+    os.makedirs(os.path.join(output_folder, split), exist_ok=True)
 
     anno_file = os.path.join('anno_smpl', split + '.npz') 
     img_folder = os.path.join('images_6fps', split, 'png')
@@ -207,8 +156,6 @@ for split in data_splits:
 
             img_path = os.path.join(img_folder, anno_dict['imgname'][idx])
 
-            #print(img_path)
-
             bbox = np.array([ anno_dict['center'][idx, 0], 
                               anno_dict['center'][idx, 1],
                               anno_dict['scale'][idx] * 1.40 / 1.2 ])
@@ -218,17 +165,9 @@ for split in data_splits:
 
             pose_aa = anno_dict['pose_world'][idx, 3:]
             betas = anno_dict['shape'][idx, :10]
-            transl = anno_dict['trans_world'][idx]
-
-
-
-            #print(transl)
-
             R = anno_dict['cam_ext'][idx][:3, :3]
             T = anno_dict['cam_ext'][idx][:3, 3:]
             K = anno_dict['cam_int'][idx]
-
-            #print(K)
 
             kps = anno_dict['gtkps'][idx]
 
@@ -238,99 +177,22 @@ for split in data_splits:
                 img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
 
 
-            canvus = img.copy()
-
-            # world space SMPL
-            smpl_output = body_model( global_orient=torch.from_numpy(orient_aa).float().unsqueeze(0).to(device),
-                                  body_pose=torch.from_numpy(pose_aa).float().unsqueeze(0).to(device),
-                                  betas=torch.from_numpy(betas).float().unsqueeze(0).to(device),
-                                  transl = torch.from_numpy(transl).float().unsqueeze(0).to(device)
-                                  )
-            J_0 = smpl_output.joints[0, [0], :].detach().cpu().numpy()
-            V = smpl_output.vertices[0].detach().cpu().numpy()
-
-            #cam_aa, _ = cv2.Rodrigues(R @ rot_mat)
-
-
-
-            #canvus = cv2.rectangle(canvus, (int(bbox[0] - bbox[2]*100), int(bbox[1] - bbox[2]*100)), (int(bbox[0] + bbox[2]*100), int(bbox[1] + bbox[2]*100)), (0, 0, 255), 2)
-            #cv2.circle(canvus, (int(bbox[0]), int(bbox[1])), 3, (0, 0, 255), -1)
-
-            rect_img, im_crop, cam_R, ori_crop, warp_kp = rectify_images (img, bbox, K, kps)
+            _, im_crop, cam_R, ori_crop, warp_kp = rectify_images (img, bbox, K, kps)
 
 
             rot_mat = np.zeros(shape=(3,3))
             rot_mat, _ = cv2.Rodrigues(cam_orient_aa)
             rectified_aa, _ = cv2.Rodrigues(cam_R @ rot_mat)
 
-            #print(rectified_aa)
+            ok, encoded = cv2.imencode(".png", ori_crop)
+            if not ok:
+                raise ValueError(f"Failed to encode original crop for {split} frame {idx}")
+            dataset_ori_crop[idx] = np.frombuffer(encoded.tobytes(), dtype='uint8')
 
-            '''
-            rect_cam = cam_R @ R
-            trans_cam = cam_R @ T
-
-            V_rect = V @ rect_cam.T + trans_cam.T
-            V_rect_cam = V_rect @ K.T
-            V_rect_cam = V_rect_cam / V_rect_cam[:, 2][:, None]
-
-            rect_canvus = rect_img.copy()
-            for v in V_rect_cam:
-                cv2.circle(rect_canvus, (int(v[0]), int(v[1])), 1, (255, 0, 0), -1)
-
-            rect_img = cv2.addWeighted(rect_canvus, 0.5, rect_img, 0.5, 0)
-            '''
-
-            smpl_output_cam = body_model( global_orient=torch.from_numpy(rectified_aa).float().view(1, -1).to(device),
-                                  body_pose=torch.from_numpy(pose_aa).float().unsqueeze(0).to(device),
-                                  betas=torch.from_numpy(betas).float().unsqueeze(0).to(device)
-                                  )
-
-            V_center = smpl_output_cam.vertices[0].detach().cpu().numpy()
-
-
-            J_0_new = smpl_output_cam.joints[0, [0], :].detach().cpu().numpy()
-
-            J_0_cam = J_0 @ R.T + T.T
-            V = V @ R.T + T.T
-
-            #V_cam = V @ K.T
-            #V_cam = V_cam / V_cam[:, 2][:, None]
-
-
-            V_new = smpl_output_cam.vertices[0].detach().cpu().numpy() - J_0_new + J_0_cam
-            #V_new = smpl_output_cam.vertices[0].detach().cpu().numpy()
-
-            # draw vertices on the canvus
-            #for v in V_cam:
-            #    cv2.circle(canvus, (int(v[0]), int(v[1])), 1, (255, 0, 0), -1)
-
-            #canvus = cv2.addWeighted(canvus, 0.5, img, 0.5, 0)
-
-
-            #cv2.imwrite(os.path.join(output_folder, split, "%07d.jpg" % idx), canvus)
-            #cv2.imwrite(os.path.join(output_folder, split, "ori_crop_%07d.jpg" % idx), ori_crop)
-            #cv2.imwrite(os.path.join(output_folder, split, "rect_crop_%07d.jpg" % idx), im_crop)
-            #cv2.imwrite(os.path.join(output_folder, split, "rect_%07d.jpg" % idx), rect_img)
-
-
-            #d = trimesh.Trimesh(vertices=V,
-            #            faces=body_model.faces,
-            #            process=False)
-            #d.export(os.path.join(output_folder, split, "%07d.obj" % idx))
-            #t = trimesh.Trimesh(vertices=V_new,
-            #            faces=body_model.faces,
-            #            process=False)
-            #t.export(os.path.join(output_folder, split, "cam_%07d.obj" % idx))
-
-            cv2.imwrite(os.path.join(output_folder, split, "tmp.png"), ori_crop)
-            with open(os.path.join(output_folder, split, "tmp.png"), 'rb') as f:
-                img_data = f.read()
-                dataset_ori_crop[idx] = np.frombuffer(img_data, dtype='uint8')
-
-            cv2.imwrite(os.path.join(output_folder, split, "tmp.png"), im_crop)
-            with open(os.path.join(output_folder, split, "tmp.png"), 'rb') as f:
-                img_data = f.read()
-                dataset_warp_crop[idx] = np.frombuffer(img_data, dtype='uint8')
+            ok, encoded = cv2.imencode(".png", im_crop)
+            if not ok:
+                raise ValueError(f"Failed to encode rectified crop for {split} frame {idx}")
+            dataset_warp_crop[idx] = np.frombuffer(encoded.tobytes(), dtype='uint8')
 
 
             dataset_betas[idx] = betas
@@ -344,8 +206,3 @@ for split in data_splits:
 
             dataset_ori_kps[idx] = kps[..., :2]
             dataset_warp_kps[idx] = warp_kp
-
-#a = Image.open('Frame0000000001_1.png')
-
-#b = a.resize((940, 1280))
-#b.save('bg.png')
