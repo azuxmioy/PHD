@@ -1,0 +1,25 @@
+# V1: legacy per-frame fitting (B=1) with prev_params chaining between frames.
+# Reproduces the cached paper run's setup. Slow (~90 min/sequence).
+#
+# All 17 EMDB sequences: ~24h projected, P1_14_outdoor_climb mean MPJPE 55.49 mm.
+# Prefer V8 for the same quality at ~17x the speed.
+
+fit:
+  batch_size: 64            # ignored when per_frame=true (effective_bs=1)
+  n_sample: 4
+  per_frame: true
+
+pipeline:
+  num_inference_steps: 5
+  guidance_scale: 1.5
+  use_heatmap: true
+  use_vertices: true
+
+loss:
+  w_smooth: 0.0
+  smooth_intra: false
+  smooth_intra_weight: 10.0
+  w_jitter: 0.0
+  w_reg_init: 0.0
+  gmof_sigma: 0.0
+  per_frame_loss: false

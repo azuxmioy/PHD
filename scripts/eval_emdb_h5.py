@@ -185,8 +185,53 @@ def iter_h5_batches(h5_path, sequence, batch_size, device, max_frames=None):
             }
 
 
+_YAML_SECTIONS = {
+    'fit': {'batch_size', 'n_sample', 'n_iter', 'per_frame'},
+    'pipeline': {'num_inference_steps', 'guidance_scale', 'use_heatmap', 'use_vertices'},
+    'loss': {
+        'w_smooth', 'smooth_intra', 'smooth_intra_weight',
+        'w_jitter', 'w_reg_init', 'gmof_sigma', 'per_frame_loss',
+    },
+}
+
+
+def _apply_yaml_defaults(parser, yaml_path):
+    """Read a YAML config and set parser defaults for any matching keys.
+
+    YAML layout:
+        fit: {batch_size: 64, n_sample: 4, n_iter: 50, per_frame: false}
+        pipeline: {num_inference_steps: 5, guidance_scale: 1.5, ...}
+        loss: {w_smooth: 0.0, smooth_intra: false, ...}
+
+    Unknown keys are ignored with a warning. CLI args still override.
+    """
+    import yaml
+    with open(yaml_path) as f:
+        cfg = yaml.safe_load(f) or {}
+    flat = {}
+    for section, keys in _YAML_SECTIONS.items():
+        if section not in cfg:
+            continue
+        for k, v in cfg[section].items():
+            if k in keys:
+                flat[k] = v
+            else:
+                print(f"[config] warning: unknown key '{section}.{k}' ignored")
+    if flat:
+        parser.set_defaults(**flat)
+    return flat
+
+
 def main():
-    parser = argparse.ArgumentParser()
+    # Two-pass argparse: first peek at --config so the YAML can set defaults,
+    # then build the real parser with those defaults and re-parse.
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument('--config', default=None,
+                     help='YAML config (see configs/eval/*.yaml) setting fit/pipeline/loss '
+                          'defaults. CLI args take precedence over YAML.')
+    pre_args, _ = pre.parse_known_args()
+
+    parser = argparse.ArgumentParser(parents=[pre])
     parser.add_argument('--h5', required=True)
     parser.add_argument('--sequence', default='P1_14_outdoor_climb')
     parser.add_argument('--pretrained_model_name_or_path', default='checkpoints/pointdit')
@@ -232,6 +277,10 @@ def main():
     parser.add_argument('--use_heatmap', action='store_true', default=True)
     parser.add_argument('--use_vertices', action='store_true', default=True)
     parser.add_argument('--seed', type=int, default=None)
+
+    if pre_args.config:
+        applied = _apply_yaml_defaults(parser, pre_args.config)
+        print(f"[config] loaded {pre_args.config}: {applied}")
     args = parser.parse_args()
 
     if args.seed is not None:
