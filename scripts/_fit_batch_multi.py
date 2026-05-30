@@ -285,10 +285,22 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
             opt_cam_r = opt_cam.view(batch_size, n_sample, 3)
             opt_or_r = opt_global_orient.view(batch_size, n_sample, -1)
             opt_po_r = opt_poses.view(batch_size, n_sample, -1)
+            # If causal: detach the t-1 term so the smoothness gradient only
+            # flows into frame t. Without detach, the loss is bidirectional
+            # (frame t-1 also gets pulled toward frame t).
+            if getattr(args, 'smooth_causal', False):
+                cam_prev  = opt_cam_r[:-1].detach()
+                or_prev   = opt_or_r[:-1].detach()
+                po_prev   = opt_po_r[:-1].detach()
+                cam_curr, or_curr, po_curr = opt_cam_r[1:], opt_or_r[1:], opt_po_r[1:]
+            else:
+                cam_prev, cam_curr = opt_cam_r[:-1], opt_cam_r[1:]
+                or_prev,  or_curr  = opt_or_r[:-1],  opt_or_r[1:]
+                po_prev,  po_curr  = opt_po_r[:-1],  opt_po_r[1:]
             intra_loss = (
-                ((opt_cam_r[1:] - opt_cam_r[:-1]) ** 2).sum(dim=-1).mean()
-                + ((opt_or_r[1:] - opt_or_r[:-1]) ** 2).sum(dim=-1).mean()
-                + ((opt_po_r[1:] - opt_po_r[:-1]) ** 2).sum(dim=-1).mean()
+                ((cam_curr - cam_prev) ** 2).sum(dim=-1).mean()
+                + ((or_curr - or_prev) ** 2).sum(dim=-1).mean()
+                + ((po_curr - po_prev) ** 2).sum(dim=-1).mean()
             )
             smooth_loss = smooth_loss + intra_loss * getattr(args, 'smooth_intra_weight', 10.0)
 

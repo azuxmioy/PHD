@@ -189,7 +189,7 @@ _YAML_SECTIONS = {
     'fit': {'batch_size', 'n_sample', 'n_iter', 'per_frame'},
     'pipeline': {'num_inference_steps', 'guidance_scale', 'use_heatmap', 'use_vertices'},
     'loss': {
-        'w_smooth', 'smooth_intra', 'smooth_intra_weight',
+        'w_smooth', 'smooth_intra', 'smooth_intra_weight', 'smooth_causal',
         'w_jitter', 'w_reg_init', 'gmof_sigma', 'per_frame_loss',
     },
 }
@@ -252,6 +252,10 @@ def main():
                              'large batch_size (e.g. 256) and n_sample=1.')
     parser.add_argument('--smooth_intra_weight', type=float, default=10.0,
                         help='Multiplier on intra-batch smoothness term.')
+    parser.add_argument('--smooth_causal', action='store_true',
+                        help='Causal smoothness: detach the past frame in the consecutive '
+                             '(t-1, t) difference so the smoothness gradient only flows into '
+                             'frame t (past does not get pulled toward future).')
     parser.add_argument('--w_smooth', type=float, default=0.0,
                         help='Weight on the smooth_loss term (combines prev_params smoothness '
                              'and intra-batch smoothness if enabled).')

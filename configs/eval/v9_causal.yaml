@@ -1,0 +1,30 @@
+# V9 CAUSAL: V8 + intra-batch first-difference smoothness with --smooth_causal.
+# The past frame in each (t-1, t) pair is detach()'d so the smoothness loss
+# only pulls frame t toward frame t-1 -- not vice versa.
+#
+# True full causality requires sequential fitting (see V1). This is the
+# best approximation we have inside a single batched optimization.
+#
+# All 17 EMDB sequences: ~90 min, same speed as V8/V9-bi.
+
+fit:
+  batch_size: 64
+  n_sample: 4
+  n_iter: 50
+  per_frame: false
+
+pipeline:
+  num_inference_steps: 5
+  guidance_scale: 1.5
+  use_heatmap: true
+  use_vertices: true
+
+loss:
+  w_smooth: 1.0
+  smooth_intra: true
+  smooth_intra_weight: 10.0
+  smooth_causal: true        # one-way: past frame is detached
+  w_jitter: 0.0
+  w_reg_init: 0.0
+  gmof_sigma: 0.0
+  per_frame_loss: false
