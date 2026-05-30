@@ -139,64 +139,121 @@ SMPL_MODEL_PATH=body_models/smpl python -m shapify.fit_shape_wild
 
 ## EMDB evaluation
 
-Two entry points:
+The EMDB benchmark from the paper. All variants are driven by YAML configs in [configs/eval/](configs/eval/) — one CLI per variant, no need to remember flag combinations.
 
-### A. H5 bundle + batched fitting (recommended)
+### Inputs
 
-If you have the preprocessed `emdb_eval.h5` (see preprocessing steps below), use `scripts/eval_emdb_h5.py` — it reads everything from one H5 file and processes B frames per `fit_batch` call.
+You need:
+
+1. **`emdb_eval.h5`** — preprocessed bundle of all 17 test sequences. Schema:
+   ```
+   emdb_eval.h5
+   └── P1_14_outdoor_climb/         # 17 sequences total, keyed P{i}_{seq}
+       ├── K              (3, 3)               # camera intrinsics
+       ├── bbox           (N, 3)               # cx, cy, scale per frame
+       ├── crop           (N,) jpeg bytes      # 256×256 person crops
+       ├── full_img       (N,) jpeg bytes      # full-resolution images
+       ├── kp2d           (N, 135, 3)          # Sapiens-1B OpenPose-135 keypoints
+       ├── camerahmr_init (N, 24, 3, 3)        # initial SMPL rotmats from CameraHMR
+       ├── fit_betas      (10,)                # SHAPify personalized shape
+       ├── gt_betas       (10,)                # GT shape (eval only)
+       ├── gt_pose        (N, 72)              # GT axis-angle pose (eval only)
+       └── vert_cam       (N, 6890, 3)         # GT vertices in camera frame
+   ```
+   To build it from raw EMDB, see "Preprocessing" at the bottom of this section.
+
+2. **PointDiT checkpoint** (at `checkpoints/pointdit/` by default — see [External assets](#external-assets)).
+
+3. **(Optional)** `cached.h5` — a previous run's outputs for side-by-side metric comparison via `compare_metrics_h5.py`.
+
+### One sequence
 
 ```bash
 python scripts/eval_emdb_h5.py \
+    --config configs/eval/v11_v8_lr1e4.yaml \
     --h5 /path/to/emdb_eval.h5 \
     --sequence P1_14_outdoor_climb \
-    --pretrained_model_name_or_path checkpoints/pointdit \
-    --batch_size 32 \
-    --n_sample 4 \
-    --output_dir results/emdb_h5
+    --output_dir results/v11a/
 ```
 
-Outputs `<output_dir>/<sequence>_params.npz` with `global_orient (N,1,3,3)`, `body_pose (N,23,3,3)`, `camera (N,3)`, `betas (N,10)`.
+Output: `results/v11a/P1_14_outdoor_climb_params.npz` containing
+`global_orient (N,1,3,3) / body_pose (N,23,3,3) / camera (N,3) / betas (N,10)`.
 
-On one A100, with `--batch_size 32 --n_sample 4`, P1/14_outdoor_climb (1284 frames) takes ~17 min (≈0.8 s/frame) vs ≈3 s/frame per-frame.
-
-H5 layout expected (sequences as top-level groups):
-```
-emdb_eval.h5
-└── P1_14_outdoor_climb/
-    ├── K              (3, 3)               # camera intrinsics
-    ├── bbox           (N, 3)               # cx, cy, scale per frame
-    ├── crop           (N,)  jpeg bytes     # 256×256 person crops
-    ├── full_img       (N,)  jpeg bytes     # full-resolution images
-    ├── kp2d           (N, 135, 3)          # OpenPose-135 keypoints
-    ├── camerahmr_init (N, 24, 3, 3)        # initial SMPL rotmats
-    ├── fit_betas      (10,)                # SHAPify-fitted shape
-    ├── gt_betas       (10,)                # GT shape (eval only)
-    ├── gt_pose        (N, 72)              # GT axis-angle pose (eval only)
-    └── vert_cam       (N, 6890, 3)         # GT vertices in camera frame
-```
-
-### B. From-disk layout (legacy)
-
-`scripts/fit_emdb.py` reads the per-frame on-disk layout (`rgb/`, `cropped_new/`, `bbox/`, `sapiens_1b/`, `camerahmr/`):
+### All 17 sequences + auto-metrics
 
 ```bash
-python scripts/fit_emdb.py \
-    --test_data_dir ./emdb \
-    --shape_dir ./guess_shape \
-    --pretrained_model_name_or_path checkpoints/pointdit
+EMDB_H5=/path/to/emdb_eval.h5 EMDB_CACHED=/path/to/cached.h5 \
+    bash scripts/eval_emdb_all.sh configs/eval/v11_v8_lr1e4.yaml
+# default output_dir: results/<config-basename>/
 ```
 
-Temporal smoothing on a single sequence:
+After all 17 finish, this calls `compare_metrics_h5.py` (or `compute_metrics_h5.py` if no `EMDB_CACHED`) and writes a side-by-side table to `<output_dir>/metrics.txt`.
+
+### Available configs and what they give you
+
+| Config | What | Mean MPJPE (17 seq) | s/frame |
+|---|---|---:|---:|
+| `v0_baseline.yaml` | batched, n_iter=200 (original) | 68.31 | 0.24 |
+| `v1_perframe.yaml` | B=1, prev_params chain (slow but reproduces cached) | (~55 on P1_14) | 4.2 |
+| `v8_fast.yaml` | batched, n_iter=50 | 63.91 | 0.18 |
+| `v9_bidirectional.yaml` | v8 + symmetric intra-batch smoothness | 63.53 | 0.18 |
+| `v9_causal.yaml` | v8 + one-way (detach past) smoothness | – | 0.18 |
+| **`v11_v8_lr1e4.yaml`** | **v8 + `lr_pose=1e-4`** | **61.94** | **0.18** |
+| `v11_v9causal_lr1e4.yaml` | v9-causal + `lr_pose=1e-4` | 61.93 | 0.18 |
+
+**`v11_v8_lr1e4.yaml` is the recommended config.** Reducing `lr_pose` 10× lets us refine the (already-good) CameraHMR init without drifting away from it. Beats the paper's cached run (62.52 MPJPE) by ~0.6 mm while being ~17× faster than the paper's per-frame setup.
+
+### Add temporal smoothing (V11c)
+
+Post-fit LBFGS smoother on top of any `eval_emdb_h5.py` output. Mostly for demo videos:
+
 ```bash
-python scripts/_smoother.py \
-    --img_path ./emdb/P1/14_outdoor_climb/images \
-    --pred_path ./emdb/P1/14_outdoor_climb/<exp> \
-    --kp_path ./emdb/P1/14_outdoor_climb/openpose \
-    --meta_file ./emdb/P1/14_outdoor_climb/P1_14_outdoor_climb_data.pkl \
-    --output_path ./emdb/P1/14_outdoor_climb/<exp>_smooth
+python scripts/smooth_emdb_h5.py \
+    --h5 /path/to/emdb_eval.h5 \
+    --sequence P1_14_outdoor_climb \
+    --input_npz results/v11a/P1_14_outdoor_climb_params.npz \
+    --output_npz results/v11c/P1_14_outdoor_climb_params.npz \
+    --n_iter 10 \
+    [--render_dir results/v11c/overlays/P1_14]   # optional: per-frame PNG overlays for video
 ```
 
-### Building `emdb_eval.h5` from raw EMDB
+Apply over all 17 with a one-liner:
+```bash
+for f in results/v11a/*_params.npz; do
+    seq=$(basename "$f" _params.npz)
+    python scripts/smooth_emdb_h5.py --h5 $EMDB_H5 --sequence $seq \
+        --input_npz "$f" --output_npz "results/v11c/${seq}_params.npz" --n_iter 10
+done
+```
+
+### Metrics
+
+`compare_metrics_h5.py` reports seven metrics, in mm:
+
+| Metric | Description |
+|---|---|
+| MPJPE | Pelvis-aligned joint error (paper Table 8 convention) |
+| PA-MPJPE | Procrustes-aligned (scale+R+t) joint error |
+| MVE | Pelvis-aligned vertex error |
+| PA-MVE | Procrustes-aligned vertex error |
+| C-MPJPE | Absolute camera-frame joint error (no alignment) |
+| C-MVE | Absolute camera-frame vertex error |
+| Pelvis-Err | Absolute pelvis localization error |
+
+`C-MPJPE` / `Pelvis-Err` are the metrics the paper supplement § 8.2 argues for — they include translation error rather than hiding it via pelvis alignment.
+
+### Headline numbers (mean over 17 sequences)
+
+| Method | MPJPE | PA-MPJPE | MVE | C-MPJPE | Pelvis-Err |
+|---|--:|--:|--:|--:|--:|
+| paper cached PHD run | 62.52 | 42.50 | 74.61 | 137.37 | 131.72 |
+| **`v11_v8_lr1e4.yaml`** | **61.94** | **42.60** | **73.04** | **95.97** | **82.19** |
+| `v11_v9causal_lr1e4.yaml` | 61.93 | 42.57 | 73.03 | 95.71 | 81.87 |
+| `v11_v8_lr1e4` + smoother | **61.37** | **42.27** | **72.50** | **93.82** | **80.29** |
+
+All v11 variants **match or beat the paper run** on MPJPE while being **~50 mm better** on absolute Pelvis-Err.
+
+### Preprocessing — building `emdb_eval.h5` from raw EMDB
 
 You need raw EMDB plus three external models:
 - **Sapiens-1B** (Meta) — whole-body 2D keypoints. <https://github.com/facebookresearch/sapiens>
@@ -212,6 +269,17 @@ Pipeline:
 5. **Pack into H5** — combine into one `emdb_eval.h5` with the structure above. Reference packer: `release_code/emdb_test/pack_emdb_res.py`.
 
 The scripts in `release_code/emdb_test/` are the unfiltered preprocessing code from the paper; they assume specific dataset roots and need path adjustments for your setup.
+
+### Legacy from-disk evaluation
+
+`scripts/fit_emdb.py` is the pre-H5 pipeline that reads the per-frame on-disk layout (`rgb/`, `cropped_new/`, `bbox/`, `sapiens_1b/`, `camerahmr/`). Kept for backward compat; superseded by `eval_emdb_h5.py` + the YAML configs.
+
+```bash
+python scripts/fit_emdb.py \
+    --test_data_dir ./emdb \
+    --shape_dir ./guess_shape \
+    --pretrained_model_name_or_path checkpoints/pointdit
+```
 
 ## Training PointDiT
 
