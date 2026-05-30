@@ -16,6 +16,8 @@ pipeline:
   use_heatmap: true
   use_vertices: true
 
+# Set --seed via CLI for bit-exact reproduction; leave unset for normal runs.
+
 loss:
   w_smooth: 0.0
   smooth_intra: false
