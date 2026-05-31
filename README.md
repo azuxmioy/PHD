@@ -252,19 +252,55 @@ The recommended variants **match or beat the paper run** on MPJPE while being **
 ### Preprocessing — building `emdb_eval.h5` from raw EMDB
 
 You need raw EMDB plus three external models:
-- **Sapiens-1B** (Meta) — whole-body 2D keypoints. <https://github.com/facebookresearch/sapiens>
+- **2D keypoints** — either **Sapiens-1B** (<https://github.com/facebookresearch/sapiens>, higher accuracy, needs `mmcv`) or the bundled **OpenPose-135** detector (`tools/openpose135/`, pure PyTorch, no `mmcv`). See [§ OpenPose-135 detector](#openpose-135-detector-no-mmcv-needed) below.
 - **CameraHMR** — per-frame SMPL pose initialization. <https://github.com/saiakarsh193/CameraHMR>
 - **SMPL neutral model** (already needed by the body fitter).
 
 Pipeline:
 
 1. **Extract person crops + bbox** — `release_code/emdb_test/extract_bbox.py` reads EMDB's per-frame metadata, generates 256×256 crops, writes `bbox/<n>.json` per frame.
-2. **Run Sapiens-1B 2D keypoints** — `release_code/emdb_test/get_2dkp.py` runs Sapiens on the crops and writes `sapiens_1b/<n>.json` (135-keypoint OpenPose layout).
+2. **Run 2D keypoints** — either `release_code/emdb_test/get_2dkp.py` (Sapiens-1B → `sapiens_1b/<n>.json`) or `python scripts/openpose135.py --image_dir <rgb_dir> --write_json <openpose_dir>` (OpenPose-135 → `<openpose_dir>/<n>_keypoints.json`). Both produce the 135-keypoint OpenPose layout `phd.inference.load_openpose_json` reads.
 3. **Run CameraHMR** — `release_code/emdb_test/get_hmr2init.py` calls CameraHMR per frame and writes `camerahmr/<n>.jpg_out.pkl` (with `global_orient`, `body_pose`, `pred_cam_t`).
 4. **Run SHAPify** — per subject, use `shapify/fit_shape.py` (with body measurements) or `shapify/fit_shape_wild.py` (without) on the first T-pose frame to produce `neutral_shape<P>.jpg.npy` (a 10-d β).
 5. **Pack into H5** — combine into one `emdb_eval.h5` with the structure above. Reference packer: `release_code/emdb_test/pack_emdb_res.py`.
 
 The scripts in `release_code/emdb_test/` are the unfiltered preprocessing code from the paper; they assume specific dataset roots and need path adjustments for your setup.
+
+### OpenPose-135 detector (no `mmcv` needed)
+
+`tools/openpose135/` is a self-contained PyTorch port of CMU OpenPose's **BODY_25 + 2 hands + 70-pt face** stack, producing the same 135-keypoint layout Sapiens emits. Useful when you want to skip the `mmcv` / Sapiens install.
+
+The launcher `scripts/openpose135.py` mirrors the original `bin/openpose` CLI:
+
+```bash
+# Folder of images → JSON + overlays
+python scripts/openpose135.py --image_dir rgb/ \
+    --write_json keypoints/ --write_images overlays/
+
+# Video → per-frame JSON + composited overlay video
+python scripts/openpose135.py --video clip.mp4 \
+    --write_json keypoints/ --write_video overlay.mp4
+
+# Skip the hand+face nets (~3x faster on CPU)
+python scripts/openpose135.py --image_dir rgb/ --write_json kp/ \
+    --no_hand --no_face
+
+# Use a local weights directory (skip HF auto-download)
+python scripts/openpose135.py --image foo.jpg --write_json kp/ \
+    --weights_dir ~/openpose135_pth
+```
+
+Flags follow the OpenPose binary's spelling where possible: `--write_json`, `--write_images`, `--write_video`, `--no_hand`, `--no_face`, `--number_people_max`, `--render_pose {0,1,2}`. Run `--help` for the full list.
+
+Weights auto-download from a Hugging Face mirror on first use (~400 MB total: `body_pose_model_25.pth`, `hand_pose_model.pth`, `facenet.pth`). Override the mirror with `OPENPOSE135_HF_REPO=<your-user>/<repo>` or `--hf_repo`; override the cache directory with `OPENPOSE135_CACHE_DIR`.
+
+**Architectures and weights are derived from:**
+- BODY_25 model + decoder — [TracelessLe/OpenPose.PyTorch](https://github.com/TracelessLe/OpenPose.PyTorch) (CMU `pose_iter_584000.caffemodel` ported via `caffemodel2pytorch`)
+- hand + face — [lllyasviel/ControlNet-v1-1-nightly/annotator/openpose](https://github.com/lllyasviel/ControlNet-v1-1-nightly/tree/main/annotator/openpose) (CMU `hand_pose_model.pth` + `facenet.pth`)
+
+**License caveat.** The CMU OpenPose model weights are licensed for **non-commercial use only**. The default HF mirror inherits that restriction; if you rehost yourself, document the same caveat.
+
+**Accuracy caveat.** Quality is below Sapiens-1B (and below DWPose). For paper-comparable EMDB numbers, use Sapiens. For in-the-wild demos where install friction matters more than the last few mm of MPJPE, OpenPose-135 is usually good enough.
 
 ### Legacy from-disk evaluation
 
