@@ -26,7 +26,11 @@ FILES = {
 }
 
 
-def resolve_weights(repo_id: str | None = None, cache_dir: str | None = None) -> dict[str, str]:
+def resolve_weights(
+    repo_id: str | None = None,
+    cache_dir: str | None = None,
+    kinds: tuple[str, ...] | list[str] | set[str] | None = None,
+) -> dict[str, str]:
     """Return a {kind: local_path} dict, downloading via huggingface_hub if needed.
 
     Skips downloads when a local file at `<cache_dir>/<filename>` already exists.
@@ -38,7 +42,9 @@ def resolve_weights(repo_id: str | None = None, cache_dir: str | None = None) ->
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
 
     out: dict[str, str] = {}
-    for kind, fname in FILES.items():
+    requested = FILES.keys() if kinds is None else kinds
+    for kind in requested:
+        fname = FILES[kind]
         local = Path(cache_dir) / fname
         if local.exists():
             out[kind] = str(local)

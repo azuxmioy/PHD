@@ -10,7 +10,7 @@ The H5 groups every test sequence under top-level keys like
   vert_cam (N,6890,3)
 
 This script loads frames from the H5 and reuses
-``fitting.helper.fit_batch_multi.fit_batch``. It supports batched fitting: B frames
+``fitting.helper.fit_batch.fit_batch``. It supports batched fitting: B frames
 share one PointDiT forward + one optimizer.
 
 Usage:
@@ -52,7 +52,7 @@ from diffusers import FlowMatchEulerDiscreteScheduler
 
 os.environ.setdefault('DATA_ROOT', smplfitter_data_root())
 
-from fitting.helper.fit_batch_multi import fit_batch
+from fitting.helper.fit_batch import add_fit_batch_args, apply_yaml_defaults, fit_batch
 
 def iter_h5_batches(h5_path, sequence, batch_size, device, max_frames=None):
     """Yield batched data dicts ready for fit_batch.
@@ -90,44 +90,6 @@ def iter_h5_batches(h5_path, sequence, batch_size, device, max_frames=None):
                 'K': K_global,
                 'full_imgs': full_imgs,
             }
-
-
-_YAML_SECTIONS = {
-    'fit': {'batch_size', 'n_sample', 'n_iter', 'per_frame'},
-    'pipeline': {'num_inference_steps', 'guidance_scale', 'use_heatmap', 'use_vertices'},
-    'loss': {
-        'w_smooth', 'smooth_intra', 'smooth_intra_weight', 'smooth_causal',
-        'w_jitter', 'w_reg_init', 'gmof_sigma', 'per_frame_loss',
-    },
-    'optimizer': {'lr_cam', 'lr_pose', 'lr_orient'},
-}
-
-
-def _apply_yaml_defaults(parser, yaml_path):
-    """Read a YAML config and set parser defaults for any matching keys.
-
-    YAML layout:
-        fit: {batch_size: 64, n_sample: 4, n_iter: 50, per_frame: false}
-        pipeline: {num_inference_steps: 5, guidance_scale: 1.5, ...}
-        loss: {w_smooth: 0.0, smooth_intra: false, ...}
-
-    Unknown keys are ignored with a warning. CLI args still override.
-    """
-    import yaml
-    with open(yaml_path) as f:
-        cfg = yaml.safe_load(f) or {}
-    flat = {}
-    for section, keys in _YAML_SECTIONS.items():
-        if section not in cfg:
-            continue
-        for k, v in cfg[section].items():
-            if k in keys:
-                flat[k] = v
-            else:
-                print(f"[config] warning: unknown key '{section}.{k}' ignored")
-    if flat:
-        parser.set_defaults(**flat)
-    return flat
 
 
 def main():
@@ -183,9 +145,9 @@ def main():
                         help='Use sum-over-batch (mean-over-joints) reduction so each frame '
                              'contributes single-frame-magnitude gradient. Closes the batched '
                              'vs per-frame convergence gap.')
-    parser.add_argument('--n_iter', type=int, default=None,
-                        help='Override OPT_ITER_INNER * (1 or 2) iter budget per fit_batch '
-                             'call. Useful for brute-force convergence in batched mode.')
+    parser.add_argument('--n_iter', type=int, default=100,
+                        help='Optimizer iterations per fit_batch call. Useful for brute-force '
+                             'convergence in batched mode.')
     parser.add_argument('--lr_cam', type=float, default=1e-3,
                         help='Adam LR for camera params. Default 1e-3.')
     parser.add_argument('--lr_pose', type=float, default=1e-3,
@@ -196,9 +158,10 @@ def main():
     parser.add_argument('--use_heatmap', action='store_true', default=True)
     parser.add_argument('--use_vertices', action='store_true', default=True)
     parser.add_argument('--seed', type=int, default=None)
+    add_fit_batch_args(parser)
 
     if pre_args.config:
-        applied = _apply_yaml_defaults(parser, pre_args.config)
+        applied = apply_yaml_defaults(parser, pre_args.config)
         print(f"[config] loaded {pre_args.config}: {applied}")
     args = parser.parse_args()
 

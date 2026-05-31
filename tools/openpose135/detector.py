@@ -36,7 +36,12 @@ class OpenPose135Detector:
         enable_face: bool = True,
     ):
         self.device = torch.device(device if torch.cuda.is_available() or str(device) == "cpu" else "cpu")
-        paths = weight_paths or resolve_weights()
+        required_weights = ["body25"]
+        if enable_hand:
+            required_weights.append("hand")
+        if enable_face:
+            required_weights.append("face")
+        paths = weight_paths or resolve_weights(kinds=required_weights)
         self.body = Body25(paths["body25"], device=self.device)
         # Hand and face nets are 150 / 154 MB and several hundred ms each; only
         # load them if the caller wants them.

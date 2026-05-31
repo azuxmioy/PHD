@@ -1,41 +1,37 @@
 import argparse
 import os
 import pickle
+from pathlib import Path
 import trimesh
 
-import json
-import cv2
-import numpy as np
 import torch
 from tqdm import tqdm
 import smplx
-from PIL import Image
 
 from accelerate.utils import set_seed
 
 from phd.inference import (
     IMAGE_TRANSFORM,
-    SMPL_TO_OPENPOSE,
     create_pointdit_pipeline,
     create_smpl_fitter,
-    find_cam_pos,
-    find_image_path,
-    load_openpose_json,
-    overlay_rgba,
 )
-from phd.point_stats import load_point_statistics
-from phd.utils.geometry import aa_to_rotmat
-from phd.utils.renderer import Renderer
-from phd.surface_kp import SURFACE_KP
 from phd.paths import (
     smpl_model_path,
     smplfitter_data_root,
 )
 
-from fitting.helper.fit_batch import fit_batch
+from fitting.helper.fit_batch import add_fit_batch_args, apply_yaml_defaults, fit_batch
+from fitting.helper.image_inputs import (
+    add_image_input_args,
+    create_openpose_detector,
+    is_prepared_image_folder,
+    list_input_images,
+    load_image_fit_input,
+)
+from fitting.helper.init_params import initialize_from_pointdit
+from fitting.helper.visualization import add_render_args, create_renderer, render_overlay
 
 os.environ.setdefault("DATA_ROOT", smplfitter_data_root())
-mean_points, std_points = load_point_statistics()
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -53,132 +49,76 @@ def main(args):
 
     SMPL_neutral = smplx.SMPL(model_path=smpl_model_path(), gender='neutral')
     pipeline = create_pointdit_pipeline(args.pretrained_model_name_or_path, device)
-    renderer = Renderer(SMPL_neutral.faces)
+    renderer = create_renderer(SMPL_neutral.faces, args.render)
     fitter = create_smpl_fitter()
 
     SMPL_neutral = SMPL_neutral.to(device)
 
 
 
-    folder_path = args.test_data_dir
+    folder_path = Path(args.test_data_dir)
+    prepared = is_prepared_image_folder(folder_path)
+    detector = None if prepared else create_openpose_detector(args)
+    image_list = list_input_images(folder_path, prepared=prepared)
+    if args.output_path:
+        save_root = Path(args.output_path)
+    else:
+        save_root = folder_path if folder_path.is_dir() else folder_path.parent
+    save_path = save_root / args.exp_name
+    save_path.mkdir(parents=True, exist_ok=True)
 
-    crop_path = os.path.join(folder_path, 'cropped_new')
-    
-    bbox_path = os.path.join(folder_path, 'bbox')
-    kp_path = os.path.join(folder_path, 'openpose')
-    full_image_path = os.path.join(folder_path, 'rgb')
+    for image_path in tqdm(image_list):
+        sample = load_image_fit_input(
+            image_path,
+            args,
+            prepared_root=folder_path if prepared else None,
+            detector=detector,
+        )
 
-    params_path = os.path.join(folder_path, 'params')
-    save_path = os.path.join(folder_path, args.exp_name)
-    os.makedirs(save_path, exist_ok=True)
-    image_list = [x for x in sorted(os.listdir(full_image_path)) if x.endswith(('.png', '.jpg')) and not x.startswith('.')]
+        file_name = sample.file_name
 
-    for idx, im in tqdm(enumerate(image_list)):
-
-
-        file_name = im.split('.')[0]
-
-        full_image = cv2.imread(os.path.join(os.path.join(full_image_path, im)))
-        H, W, C = full_image.shape
-
-        meta_data = pickle.load(open(os.path.join(params_path, file_name + '.pkl'), 'rb'))
-
-        focal = meta_data['focal'][0]
-        K = np.array([[focal, 0, W/2],
-                     [0, focal, H/2],
-                     [0, 0, 1]])
-
-        full_kp = load_openpose_json(os.path.join(kp_path, file_name + '_keypoints.json'), thres=0.1)
-        confidence = full_kp[:, 2]
-        full_kp = torch.tensor(full_kp)
-                
-        with open(os.path.join(bbox_path, file_name + '.json'), 'r') as file:
-            bbox_dict = json.load(file)
-            bbox = bbox_dict['bbox']
-        crop_image_path = find_image_path(crop_path, file_name)
-        rect_image = Image.open(crop_image_path).convert('RGB')
-
-        fit_betas = meta_data['betas'].squeeze()
+        full_image = sample.full_image
+        H, W = full_image.shape[:2]
 
         data = {}
-        data['input_tensor'] = IMAGE_TRANSFORM(rect_image).unsqueeze(0).to(device)
-        data['cond_betas']   = torch.from_numpy(fit_betas).view(1, -1).float().to(device)
+        data['input_tensor'] = IMAGE_TRANSFORM(sample.crop_image).unsqueeze(0).to(device)
+        data['cond_betas'] = torch.from_numpy(sample.betas).view(1, -1).float().to(device)
 
+        initialization = initialize_from_pointdit(
+            SMPL_neutral,
+            fitter,
+            pipeline,
+            data,
+            args,
+            generator,
+            sample.keypoints,
+            sample.K,
+            sample.bbox,
+            image_size=(H, W),
+        )
 
-        with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
-                    
-            poses, _, _ = pipeline(data,
-                        args,
-                        num_images_per_prompt = args.num_validation_images,
-                        num_inference_steps=args.num_inference_steps,
-                        generator=generator,
-                        guidance_scale=args.guidance_scale,
-                        mode = 'test',
-                        return_dict = True
-                        )
-  
+        render_overlay(
+            renderer,
+            full_image,
+            initialization.vertices[0],
+            initialization.camera[0],
+            sample.K,
+            str(save_path / f"{file_name}_init.jpg"),
+        )
 
-        # average_multiple_samples
-        poses = torch.mean(poses, dim=0, keepdim=True)
-
-        fitter = fitter.to(poses.device)
-        pred_points = mean_points[None, ...].to(poses.device) + poses.detach() * std_points[None, ...].to(poses.device)
-
-        surface_kp = pred_points[:, :len(SURFACE_KP)]
-        joints = pred_points[:, len(SURFACE_KP):len(SURFACE_KP)+24 ]
-        fit_res = fitter.fit(surface_kp, joints, n_iter=3, beta_regularizer=1, initial_shape_betas=data['cond_betas'].repeat(surface_kp.shape[0], 1))
-                    
- 
-        fit_res['pose_rotvecs'][:, -12:] = 0.0
-        fit_pose_rotmat =  aa_to_rotmat(fit_res['pose_rotvecs'].view(-1, 3)).view(-1, 24, 3, 3)
-
-        derect_orient = fit_pose_rotmat[:, 0:1]
-        body_pose = fit_pose_rotmat[:, 1:]
-
-        smpl_output = SMPL_neutral( global_orient=derect_orient,
-                              body_pose= body_pose ,
-                              betas=data['cond_betas'],
-                              pose2rot=False
-                              )
-
-        sample_smpl_V = smpl_output.vertices.detach().cpu().numpy()
-        sample_smpl_J = smpl_output.joints.detach().cpu()[:, SMPL_TO_OPENPOSE]
-
-
-                
-
-        fit_body_joints = list(range(25))
-
-        if np.all(confidence[fit_body_joints] < 0.1):
-            offset_x = (bbox[0] - W / 2) / K[0, 0]
-            offset_y = (bbox[1] - H / 2) / K[0, 0]
-            offset_z = -2.0
-            cam_offset = torch.tensor([offset_x * offset_z, offset_y * offset_z, offset_z]).unsqueeze(0).float()
-        else:
-            cam_offset = find_cam_pos(sample_smpl_J[:, fit_body_joints],
-                                           full_kp[fit_body_joints].unsqueeze(0), K)
-
-
-        render_init = renderer.render_rgba( sample_smpl_V[0],
-                            cam_t = -cam_offset[0].detach().cpu().numpy(),
-                            render_res=(W, H),
-                            mesh_base_color=(0.650,  0.741,  0.858),
-                            scene_bg_color=(1, 1, 1),
-                            focal_length=K[0, 0]
-            )
-                
-        input_img_overlay = overlay_rgba(full_image, render_init)
-        cv2.imwrite(os.path.join(save_path, file_name + '_init.jpg'), input_img_overlay)
-
-                
-
-        init_params={
-            'body_pose': body_pose.detach(),
-            'global_orient': derect_orient.detach(),
-            'camera': cam_offset.to(device).detach(),
-        }
-
-        out_params = fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params, full_kp, K, bbox, keypoint_type='openpose25')
+        out_params = fit_batch(
+            SMPL_neutral,
+            fitter,
+            data,
+            args,
+            generator,
+            pipeline,
+            initialization.init_params,
+            sample.keypoints,
+            sample.K,
+            sample.bbox,
+            keypoint_type='openpose25',
+        )
 
         smpl_output = SMPL_neutral( global_orient=out_params['global_orient'],
                               body_pose=out_params['body_pose'],
@@ -186,21 +126,19 @@ def main(args):
                               pose2rot=False)
                 
         v = smpl_output.vertices[0].detach().cpu().numpy()
-        render_fit = renderer.render_rgba(v,
-                            cam_t = -out_params['camera'][0].cpu().numpy(),
-                            render_res=(W, H),
-                            mesh_base_color=(0.650,  0.741,  0.858),
-                            scene_bg_color=(1, 1, 1),
-                            focal_length=K[0, 0]
-            )
-                
-        input_img_overlay = overlay_rgba(full_image, render_fit)
-        cv2.imwrite(os.path.join(save_path, file_name + '_fit.jpg'), input_img_overlay)
+        render_overlay(
+            renderer,
+            full_image,
+            v,
+            out_params['camera'][0],
+            sample.K,
+            str(save_path / f"{file_name}_fit.jpg"),
+        )
 
         t = trimesh.Trimesh(vertices = v, faces = SMPL_neutral.faces, process=False)
-        t.export(os.path.join(save_path, file_name + '_avg.obj'))
+        t.export(save_path / f"{file_name}_avg.obj")
 
-        with open(os.path.join(save_path, file_name + '_params.pkl' ), 'wb') as f:
+        with open(save_path / f"{file_name}_params.pkl", 'wb') as f:
             out_dict = {
                         'body_pose': out_params['body_pose'].cpu().numpy(),
                         'global_orient': out_params['global_orient'].cpu().numpy(),
@@ -213,6 +151,8 @@ if __name__ == "__main__":
 
 
     parser = argparse.ArgumentParser()
+    parser.add_argument('--config', default=None,
+                        help='YAML config setting fit/pipeline/loss/optimizer defaults. CLI args override it.')
 
     parser.add_argument(
         "-t",
@@ -220,24 +160,25 @@ if __name__ == "__main__":
         type=str,
         default="demo_data",
         help=(
-            "Path to a folder with subdirectories: rgb/ (full images), cropped_new/ (256x256 crops), "
-            "bbox/ (bbox JSON), openpose/ (OpenPose JSON), params/ (per-image .pkl with betas + focal)."
+            "Path to a raw image, a folder of raw images, or a prepared folder with "
+            "rgb/, cropped_new/, bbox/, and openpose/ subdirectories."
         ),
     )
     parser.add_argument(
         "-o",
         "--output_path",
         type=str,
-        default="./fitting",
+        default=None,
         help=(
-            "The output path for the generated images. The generated images will be saved in this path."
+            "Optional output root. Results are written to <output_path>/<exp_name>; "
+            "by default they are written next to the input image/folder."
         ),
     )
     parser.add_argument(
         "--exp_name",
         type=str,
         default="single_image_fit",
-        help="Name of the output folder written under --test_data_dir.",
+        help="Name of the output folder.",
     )
     parser.add_argument(
         "--pretrained_model_name_or_path",
@@ -270,7 +211,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_sample",
         type=int,
-        default=4,
+        default=1,
         help="Number of PointDiT samples per input frame; final result averages over n_sample.",
     )
     parser.add_argument(
@@ -298,8 +239,27 @@ if __name__ == "__main__":
             "Whether to save_points"
         ),
     )
+    add_render_args(parser)
+    add_image_input_args(parser)
 
+    add_fit_batch_args(parser, defaults={
+        "n_sample": 1,
+        "n_iter": 300,
+        "w_kp": 1.0,
+        "w_smooth": 0.0,
+        "w_point": 100.0,
+        "lr_cam": 1e-3,
+        "lr_pose": 1e-3,
+        "lr_orient": 1e-5,
+        "hand_loss_weight": 0.05,
+        "hand_pose_reg_weight": 0.1,
+        "point_pose_weight": 0.0,
+    })
 
+    pre_args, _ = parser.parse_known_args()
+    if pre_args.config:
+        applied = apply_yaml_defaults(parser, pre_args.config)
+        print(f"[config] loaded {pre_args.config}: {applied}")
     args = parser.parse_args()
 
 

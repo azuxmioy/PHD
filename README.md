@@ -93,21 +93,28 @@ You need three things that are **not** in this repo:
 
 ```bash
 python -m fitting.fit_image \
-    --test_data_dir demo_data/single \
+    --test_data_dir demo_data/person.jpg \
     --exp_name demo_out \
     --pretrained_model_name_or_path checkpoints/pointdit \
     --guidance_scale 1.5 \
     --num_inference_steps 5
 ```
 
-Outputs (`<test_data_dir>/demo_out/`):
+`--test_data_dir` can be a single raw image, a folder of raw images, or the old
+prepared folder layout. For raw images, `fit_image.py` runs the bundled
+PyTorch OpenPose-135 detector, estimates the person bbox, builds the 256x256
+crop in memory, and uses `--focal_length` plus zero betas unless `--betas_path`
+is supplied. Use `--openpose_weights_dir` to point at local OpenPose-135
+weights.
 
-- `*_init.jpg` — overlay of the initial PointDiT sample (before fitting).
-- `*_fit.jpg` — overlay after the iterative body fit.
+Outputs go to `<image_parent_or_folder>/demo_out/`, or
+`<output_path>/demo_out/` when `--output_path` is provided:
+
 - `*_avg.obj` — fitted SMPL mesh.
 - `*_params.pkl` — SMPL params (`body_pose`, `global_orient`, `betas`, `camera`).
+- With `--render`: `*_init.jpg` and `*_fit.jpg` mesh overlays. Rendering is disabled by default because it is slow.
 
-Expected input layout under `--test_data_dir`:
+Optional prepared input layout under `--test_data_dir`:
 
 ```
 demo_data/single/
@@ -117,6 +124,10 @@ demo_data/single/
 ├── openpose/{id}_keypoints.json   # OpenPose / Sapiens output
 └── params/{id}.pkl         # {"focal": [fx], "betas": np.ndarray}
 ```
+
+`fit_image.py`, `fit_video.py`, and `fit_emdb.py` share the same configurable
+`fitting.helper.fit_batch` optimizer. Pass `--config <yaml>` to any of them to
+override `fit`, `pipeline`, `loss`, or `optimizer` defaults.
 
 ## SHAPify (personal body shape)
 
@@ -271,6 +282,11 @@ The scripts in `release_code/emdb_test/` are the unfiltered preprocessing code f
 
 `tools/openpose135/` is a self-contained PyTorch port of CMU OpenPose's **BODY_25 + 2 hands + 70-pt face** stack, producing the same 135-keypoint layout Sapiens emits. Useful when you want to skip the `mmcv` / Sapiens install.
 
+`fitting.fit_image` uses this detector directly for raw images, so single-image
+demos no longer need precomputed `openpose/`, `bbox/`, or `cropped_new/`
+folders. The standalone launcher is still useful when preprocessing EMDB or
+video folders.
+
 The launcher (`python -m tools.openpose135`) mirrors the original `bin/openpose` CLI:
 
 ```bash
@@ -317,7 +333,7 @@ python -m fitting.fit_emdb \
 
 ## In-the-wild videos
 
-`fitting/fit_video.py` expects a prepared video folder with `rgb/`, `cropped_new/`, `bbox/`, `openpose/`, and `neutral_shape.npy` under `<root>/<subject>/<sequence>/`. It writes rendered overlays, meshes, and SMPL params to `<sequence>/<exp_name>/`.
+`fitting/fit_video.py` expects a prepared video folder with `rgb/`, `cropped_new/`, `bbox/`, `openpose/`, and `neutral_shape.npy` under `<root>/<subject>/<sequence>/`. It writes meshes and SMPL params to `<sequence>/<exp_name>/`; add `--render` to also save rendered overlays.
 
 ```bash
 python -m fitting.fit_video \
@@ -328,7 +344,7 @@ python -m fitting.fit_video \
     --pretrained_model_name_or_path checkpoints/pointdit
 ```
 
-Create an mp4 from rendered overlays:
+Create an mp4 from rendered overlays after running `fit_video.py` with `--render`:
 
 ```bash
 python -m fitting.helper.gen_vid \
