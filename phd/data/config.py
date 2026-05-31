@@ -45,11 +45,30 @@ def parse_options():
     dataset_group = parser.add_argument_group('dataset')
 
     dataset_group.add_argument(
+        "--dataset_format",
+        type=str,
+        default="h5",
+        choices=["h5", "image"],
+        help=(
+            "Training dataset backend. 'h5' reads preprocessed BEDLAM H5 shards; "
+            "'image' reads raw BEDLAM image folders and anno_smpl npz files."
+        ),
+    )
+    dataset_group.add_argument(
         "--train_data_dir",
         type=str,
         default='../data/dataset.h5',
         help=(
             "path of h5f file containing the training dataset"
+        ),
+    )
+    dataset_group.add_argument(
+        "--rectify_images",
+        action="store_true",
+        default=False,
+        help=(
+            "Apply BEDLAM camera-rotation rectification before cropping. "
+            "For dataset_format='image' this is computed online; for 'h5' it uses warp_crop/warp_kps/orient_rect."
         ),
     )
     dataset_group.add_argument(

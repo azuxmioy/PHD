@@ -357,7 +357,7 @@ python -m fitting.helper.gen_vid \
 
 ## Training PointDiT
 
-Edit `phd/config/train.yaml` to point `dataset.train_data_dir` at your BEDLAM H5 shards (see `phd/data/bedlam/` for preprocessing scripts). Then:
+Edit `phd/config/train.yaml` to point `dataset.train_data_dir` at your BEDLAM root. Use `dataset_format: image` for raw `anno_smpl/` + `images_6fps/` loading, or `dataset_format: h5` for preprocessed shards. `rectify_images` is available as an opt-in BEDLAM camera-rectification experiment flag (see `phd/data/bedlam/README.md`). Then:
 
 ```bash
 accelerate config             # one-time

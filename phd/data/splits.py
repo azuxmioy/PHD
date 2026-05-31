@@ -1,4 +1,4 @@
-"""Dataset split names used by the BEDLAM PointDiT training loader."""
+"""BEDLAM split names used by the PointDiT training loaders."""
 
 BEDLAM_TRAIN_SPLITS = [
     "20221010_3_1000_batch01hand_6fps",
@@ -33,21 +33,6 @@ BEDLAM_TRAIN_SPLITS = [
     "20221019_3-8_250_highbmihand_orbit_stadium_6fps",
 ]
 
-WILD_TRAIN_SPLITS = [
-    "aic",
-    "coco",
-    "insta1_v1",
-    "insta1_v2",
-    "insta1_v3",
-    "insta2_v1",
-    "insta2_v2",
-    "insta2_v3",
-    "mpii",
-]
-
-TRAIN_SPLITS = BEDLAM_TRAIN_SPLITS + WILD_TRAIN_SPLITS
-
-VAL_SPLITS = [
-    "coco",
+BEDLAM_VAL_SPLITS = [
     "20221019_1_250_highbmihand_closeup_suburb_b_6fps",
 ]

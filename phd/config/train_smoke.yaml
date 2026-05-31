@@ -7,7 +7,9 @@ global:
 dataset:
   # Point directly at the downloaded single H5; the patched loader detects
   # this layout and ignores the BEDLAM data_splits list.
+  dataset_format: 'h5'
   train_data_dir: '/data/hohs2/datasets/bedlam/2_221_24_3-1__1___batch_1handhair_static_highSchoolGym_3_fps.h5'
+  rectify_images: False
   test_data_dir: ''
   dataloader_num_workers: 2
   resolution: 256

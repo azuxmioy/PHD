@@ -1,4 +1,10 @@
-import os
+"""Build per-split BEDLAM H5 shards for PointDiT training."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
 import cv2
 import numpy as np
 from tqdm import tqdm
@@ -6,9 +12,54 @@ import h5py
 
 from phd.data.splits import BEDLAM_TRAIN_SPLITS
 
-output_folder = 'bedlam_v2_h5_full'
-DATA_SPLITS = BEDLAM_TRAIN_SPLITS
-dt = h5py.special_dtype(vlen=np.uint8)
+DEFAULT_OUTPUT_DIR = Path("data/bedlam_h5")
+DT = h5py.special_dtype(vlen=np.uint8)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--bedlam_root",
+        type=Path,
+        default=Path("."),
+        help="Root containing BEDLAM anno_smpl/ and images_6fps/ directories.",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help="Directory where split subfolders and anno_smpl.h5 files are written.",
+    )
+    parser.add_argument(
+        "--splits",
+        nargs="+",
+        default=BEDLAM_TRAIN_SPLITS,
+        help="BEDLAM split names to process.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Write visual rectification checks instead of building H5 shards.",
+    )
+    parser.add_argument(
+        "--debug_split",
+        default=None,
+        help="Split to visualize in debug mode. Defaults to the first requested split.",
+    )
+    parser.add_argument(
+        "--debug_indices",
+        nargs="+",
+        type=int,
+        default=[141, 142, 143, 144, 145],
+        help="Frame indices to visualize in debug mode.",
+    )
+    parser.add_argument(
+        "--debug_output_dir",
+        type=Path,
+        default=Path("data/bedlam_debug"),
+        help="Directory where debug images are written.",
+    )
+    return parser.parse_args()
 
 
 def get_transform(center, scale, res, rot=0):
@@ -123,45 +174,112 @@ def rectify_images(img, bbox, K, kps):
     return rectified_image, im_crop, R, ori_crop, warp_kp
 
 
-for split in DATA_SPLITS:
+def draw_keypoints(image, keypoints, color=(255, 0, 0)):
+    canvas = image.copy()
+    for kp in keypoints:
+        if np.all(np.isfinite(kp[:2])):
+            cv2.circle(canvas, (int(kp[0]), int(kp[1])), 2, color, -1)
+    return canvas
 
-    os.makedirs(os.path.join(output_folder, split), exist_ok=True)
 
-    anno_file = os.path.join('anno_smpl', split + '.npz') 
-    img_folder = os.path.join('images_6fps', split, 'png')
+def draw_bbox(image, center, scale, color=(0, 0, 255)):
+    canvas = image.copy()
+    radius = int(scale * 100)
+    center = np.asarray(center).astype(int)
+    top_left = (int(center[0] - radius), int(center[1] - radius))
+    bottom_right = (int(center[0] + radius), int(center[1] + radius))
+    cv2.rectangle(canvas, top_left, bottom_right, color, 2)
+    cv2.circle(canvas, (int(center[0]), int(center[1])), 3, color, -1)
+    return canvas
+
+
+def to_uint8_image(image):
+    return np.clip(image, 0, 255).astype(np.uint8)
+
+
+def write_debug_images(split: str, bedlam_root: Path, output_dir: Path, indices: list[int]):
+    output_dir = output_dir / split
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    anno_file = bedlam_root / "anno_smpl" / f"{split}.npz"
+    img_folder = bedlam_root / "images_6fps" / split / "png"
+    if not anno_file.is_file():
+        raise FileNotFoundError(f"Missing BEDLAM annotation file: {anno_file}")
+    if not img_folder.is_dir():
+        raise FileNotFoundError(f"Missing BEDLAM image directory: {img_folder}")
 
     anno_dict = np.load(anno_file, allow_pickle=True)
 
+    for idx in tqdm(indices, desc=f"debug {split}"):
+        img_name = anno_dict["imgname"][idx]
+        if isinstance(img_name, bytes):
+            img_name = img_name.decode("utf-8")
+        img_path = img_folder / str(img_name)
+        img = cv2.imread(str(img_path))
+        if img is None:
+            raise FileNotFoundError(f"Could not read BEDLAM image: {img_path}")
+        if "closeup" in split:
+            img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+
+        bbox = np.array([
+            anno_dict["center"][idx, 0],
+            anno_dict["center"][idx, 1],
+            anno_dict["scale"][idx] * 1.40 / 1.2,
+        ])
+        K = anno_dict["cam_int"][idx]
+        kps = anno_dict["gtkps"][idx]
+
+        rect_img, rect_crop, _, ori_crop, warp_kp = rectify_images(img, bbox, K, kps)
+
+        original_vis = draw_keypoints(draw_bbox(img, bbox[:2], bbox[2]), kps[..., :2])
+        rectified_vis = draw_keypoints(rect_img, warp_kp)
+        cv2.imwrite(str(output_dir / f"{idx:07d}_original.jpg"), to_uint8_image(original_vis))
+        cv2.imwrite(str(output_dir / f"{idx:07d}_rectified.jpg"), to_uint8_image(rectified_vis))
+        cv2.imwrite(str(output_dir / f"{idx:07d}_ori_crop.jpg"), to_uint8_image(ori_crop))
+        cv2.imwrite(str(output_dir / f"{idx:07d}_rect_crop.jpg"), to_uint8_image(rect_crop))
+
+
+def process_split(split: str, bedlam_root: Path, output_dir: Path):
+    split_dir = output_dir / split
+    split_dir.mkdir(parents=True, exist_ok=True)
+
+    anno_file = bedlam_root / "anno_smpl" / f"{split}.npz"
+    img_folder = bedlam_root / "images_6fps" / split / "png"
+    if not anno_file.is_file():
+        raise FileNotFoundError(f"Missing BEDLAM annotation file: {anno_file}")
+    if not img_folder.is_dir():
+        raise FileNotFoundError(f"Missing BEDLAM image directory: {img_folder}")
+
+    anno_dict = np.load(anno_file, allow_pickle=True)
     n_images = anno_dict['imgname'].shape[0]
-    
 
-    with h5py.File(os.path.join(output_folder, split, "anno_smpl.h5"), 'w') as h5f:
+    with h5py.File(split_dir / "anno_smpl.h5", 'w') as h5f:
+        dataset_betas = h5f.create_dataset('betas', shape=(n_images, 10), chunks=True, dtype=np.float32)
+        dataset_body_poses = h5f.create_dataset('body_poses', shape=(n_images, 69), chunks=True, dtype=np.float32)
+        dataset_global_orient_world = h5f.create_dataset('orient_world', shape=(n_images, 3), chunks=True, dtype=np.float32)
+        dataset_global_orient_cam = h5f.create_dataset('orient_cam', shape=(n_images, 3), chunks=True, dtype=np.float32)
+        dataset_global_orient_rect = h5f.create_dataset('orient_rect', shape=(n_images, 3), chunks=True, dtype=np.float32)
+        dataset_bbox = h5f.create_dataset('bbox', shape=(n_images, 3), chunks=True, dtype=np.float32)
+        dataset_K = h5f.create_dataset('K', shape=(n_images, 3, 3), chunks=True, dtype=np.float32)
+        dataset_RT = h5f.create_dataset('RT', shape=(n_images, 3, 4), chunks=True, dtype=np.float32)
 
-        dataset_betas = h5f.create_dataset( 'betas', shape=(n_images, 10), chunks=True, dtype=np.float32)
-        dataset_body_poses = h5f.create_dataset( 'body_poses', shape=(n_images, 69), chunks=True, dtype=np.float32)
-        dataset_global_orient_world = h5f.create_dataset( 'orient_world', shape=(n_images, 3), chunks=True, dtype=np.float32)
-        dataset_global_orient_cam = h5f.create_dataset( 'orient_cam', shape=(n_images, 3), chunks=True, dtype=np.float32)
-        dataset_global_orient_rect = h5f.create_dataset( 'orient_rect', shape=(n_images, 3), chunks=True, dtype=np.float32)
-        dataset_bbox = h5f.create_dataset( 'bbox', shape=(n_images, 3), chunks=True, dtype=np.float32)
-        dataset_K = h5f.create_dataset( 'K', shape=(n_images, 3, 3), chunks=True, dtype=np.float32)
-        dataset_RT = h5f.create_dataset( 'RT', shape=(n_images, 3, 4), chunks=True, dtype=np.float32)
-        
-        dataset_ori_kps = h5f.create_dataset( 'ori_kps', shape=(n_images, 45, 2), chunks=True, dtype=np.float32)
-        dataset_warp_kps = h5f.create_dataset( 'warp_kps', shape=(n_images, 45, 2), chunks=True, dtype=np.float32)
-        dataset_warp_crop = h5f.create_dataset('warp_crop', shape=(n_images, ), chunks=True, dtype=dt)
-        dataset_ori_crop = h5f.create_dataset('ori_crop', shape=(n_images, ), chunks=True, dtype=dt)
+        dataset_ori_kps = h5f.create_dataset('ori_kps', shape=(n_images, 45, 2), chunks=True, dtype=np.float32)
+        dataset_warp_kps = h5f.create_dataset('warp_kps', shape=(n_images, 45, 2), chunks=True, dtype=np.float32)
+        dataset_warp_crop = h5f.create_dataset('warp_crop', shape=(n_images,), chunks=True, dtype=DT)
+        dataset_ori_crop = h5f.create_dataset('ori_crop', shape=(n_images,), chunks=True, dtype=DT)
 
-        for idx in tqdm(range(n_images)):
-        #for idx in range(141,146):
+        for idx in tqdm(range(n_images), desc=split, leave=False):
+            img_name = anno_dict['imgname'][idx]
+            if isinstance(img_name, bytes):
+                img_name = img_name.decode("utf-8")
+            img_path = img_folder / str(img_name)
 
-            img_path = os.path.join(img_folder, anno_dict['imgname'][idx])
-
-            bbox = np.array([ anno_dict['center'][idx, 0], 
-                              anno_dict['center'][idx, 1],
-                              anno_dict['scale'][idx] * 1.40 / 1.2 ])
+            bbox = np.array([anno_dict['center'][idx, 0],
+                             anno_dict['center'][idx, 1],
+                             anno_dict['scale'][idx] * 1.40 / 1.2])
 
             orient_aa = anno_dict['pose_world'][idx, :3]
-            cam_orient_aa =  anno_dict['pose_cam'][idx, :3]
+            cam_orient_aa = anno_dict['pose_cam'][idx, :3]
 
             pose_aa = anno_dict['pose_world'][idx, 3:]
             betas = anno_dict['shape'][idx, :10]
@@ -171,16 +289,15 @@ for split in DATA_SPLITS:
 
             kps = anno_dict['gtkps'][idx]
 
-            img = cv2.imread(img_path)
+            img = cv2.imread(str(img_path))
+            if img is None:
+                raise FileNotFoundError(f"Could not read BEDLAM image: {img_path}")
 
             if 'closeup' in split:
                 img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
 
+            _, im_crop, cam_R, ori_crop, warp_kp = rectify_images(img, bbox, K, kps)
 
-            _, im_crop, cam_R, ori_crop, warp_kp = rectify_images (img, bbox, K, kps)
-
-
-            rot_mat = np.zeros(shape=(3,3))
             rot_mat, _ = cv2.Rodrigues(cam_orient_aa)
             rectified_aa, _ = cv2.Rodrigues(cam_R @ rot_mat)
 
@@ -194,7 +311,6 @@ for split in DATA_SPLITS:
                 raise ValueError(f"Failed to encode rectified crop for {split} frame {idx}")
             dataset_warp_crop[idx] = np.frombuffer(encoded.tobytes(), dtype='uint8')
 
-
             dataset_betas[idx] = betas
             dataset_body_poses[idx] = pose_aa
             dataset_global_orient_world[idx] = orient_aa
@@ -206,3 +322,26 @@ for split in DATA_SPLITS:
 
             dataset_ori_kps[idx] = kps[..., :2]
             dataset_warp_kps[idx] = warp_kp
+
+
+def main():
+    args = parse_args()
+    bedlam_root = args.bedlam_root.expanduser().resolve()
+    output_dir = args.output_dir.expanduser().resolve()
+
+    if args.debug:
+        split = args.debug_split or args.splits[0]
+        write_debug_images(
+            split=split,
+            bedlam_root=bedlam_root,
+            output_dir=args.debug_output_dir.expanduser().resolve(),
+            indices=args.debug_indices,
+        )
+        return
+
+    for split in tqdm(args.splits, desc="BEDLAM splits"):
+        process_split(split, bedlam_root, output_dir)
+
+
+if __name__ == "__main__":
+    main()

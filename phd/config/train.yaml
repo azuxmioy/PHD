@@ -7,8 +7,11 @@ global:
   seed: 2434
 
 dataset:
-  # Path to BEDLAM H5 shards used for training.
-  train_data_dir: './data/bedlam_h5'
+  # 'image' reads raw BEDLAM anno_smpl/ + images_6fps/ on the fly.
+  # Use 'h5' with train_data_dir './data/bedlam_h5' for preprocessed shards.
+  dataset_format: 'image'
+  train_data_dir: './data/bedlam'
+  rectify_images: False
   # Path to EMDB or equivalent benchmark used for validation.
   test_data_dir: './data/emdb'
   dataloader_num_workers: 16
