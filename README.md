@@ -131,8 +131,9 @@ override `fit`, `pipeline`, `loss`, or `optimizer` defaults.
 
 ## SHAPify (personal body shape)
 
-SHAPify uses one launcher with YAML profiles in `shapify/configs/`.
-It follows the paper setup: a T-pose image plus per-subject body height and weight.
+SHAPify has one direct script per input type, with shared optimization code in
+`shapify/fitter.py` and YAML profiles in `shapify/configs/`. The paper setup
+uses a T-pose image plus per-subject body height and weight.
 
 ```bash
 SMPL_MODEL_PATH=body_models/smpl \
@@ -144,6 +145,10 @@ python -m shapify.fit_shape \
 ```
 
 `subjects.json` is a list of `{image, pose, height, weight, gender}` entries (see [demo_data/subjects_example.json](demo_data/subjects_example.json)). Image and OpenPose JSON paths are resolved relative to `--input_dir`. Output is `neutral_shape<image>.npy` — a 10-dim β vector per subject. Feed this β into the body fitter via the per-image `params/*.pkl`.
+
+For static-subject smartphone video, use `python -m shapify.fit_shape_video`
+with `shapify/configs/measured_video.yaml`; that path shares one β and body pose
+across sampled frames while fitting per-frame camera poses.
 
 ## EMDB evaluation
 

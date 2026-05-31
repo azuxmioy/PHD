@@ -5,8 +5,7 @@ This package is scoped to personal shape fitting:
 - `fit_shape.py`: single-image, T-pose body-measurement shape fitting.
 - `fit_shape_video.py`: multi-view shape fitting for static subject + moving smartphone camera (no T-pose required).
 - `configs/*.yaml`: run profiles (`measured.yaml` for T-pose single image, `measured_video.yaml` for video).
-- `runner.py` / `runner_video.py`: config-driven launcher implementations.
-- `fitter.py` / `fitter_video.py`: shared beta optimizers.
+- `fitter.py`: shared single-image and video beta optimizers plus small shared output helpers.
 - `config.py`: shared SHAPify defaults and SMPL factory helpers.
 - `visualize.py`: optional `.obj` shape comparison viewer; requires `aitviewer`.
 
@@ -52,7 +51,7 @@ silhouette ambiguity it used to resolve.
 ]
 ```
 
-When `subject_dir` is used, the runner accepts both layouts:
+When `subject_dir` is used, the video script accepts both layouts:
 
 - **Prepared** (takes precedence if present): `rgb/`, `cropped_new/`, `bbox/`, `openpose/` subdirectories.
 - **Raw**: just image files; the bundled OpenPose-135 detector handles 2D
