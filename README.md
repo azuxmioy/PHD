@@ -131,19 +131,16 @@ override `fit`, `pipeline`, `loss`, or `optimizer` defaults.
 
 ## SHAPify (personal body shape)
 
-`shapify/fit_shape.py` requires per-subject body height + weight (best accuracy).
-`shapify/fit_shape_wild.py` works without measurements.
+SHAPify uses one launcher with YAML profiles in `shapify/configs/`.
+It follows the paper setup: a T-pose image plus per-subject body height and weight.
 
 ```bash
-# With body measurements (best accuracy)
 SMPL_MODEL_PATH=body_models/smpl \
 python -m shapify.fit_shape \
+    --config shapify/configs/measured.yaml \
     --subjects demo_data/subjects_example.json \
     --input_dir my_subjects/ \
     --output_dir guess_shape/
-
-# Without measurements
-SMPL_MODEL_PATH=body_models/smpl python -m shapify.fit_shape_wild
 ```
 
 `subjects.json` is a list of `{image, pose, height, weight, gender}` entries (see [demo_data/subjects_example.json](demo_data/subjects_example.json)). Image and OpenPose JSON paths are resolved relative to `--input_dir`. Output is `neutral_shape<image>.npy` — a 10-dim β vector per subject. Feed this β into the body fitter via the per-image `params/*.pkl`.
@@ -273,7 +270,7 @@ Pipeline:
 1. **Extract person crops + bbox** — `release_code/emdb_test/extract_bbox.py` reads EMDB's per-frame metadata, generates 256×256 crops, writes `bbox/<n>.json` per frame.
 2. **Run 2D keypoints** — either `release_code/emdb_test/get_2dkp.py` (Sapiens-1B → `sapiens_1b/<n>.json`) or `python -m tools.openpose135 --image_dir <rgb_dir> --write_json <openpose_dir>` (OpenPose-135 → `<openpose_dir>/<n>_keypoints.json`). Both produce the 135-keypoint OpenPose layout `phd.inference.load_openpose_json` reads.
 3. **Run CameraHMR** — `release_code/emdb_test/get_hmr2init.py` calls CameraHMR per frame and writes `camerahmr/<n>.jpg_out.pkl` (with `global_orient`, `body_pose`, `pred_cam_t`).
-4. **Run SHAPify** — per subject, use `shapify/fit_shape.py` (with body measurements) or `shapify/fit_shape_wild.py` (without) on the first T-pose frame to produce `neutral_shape<P>.jpg.npy` (a 10-d β).
+4. **Run SHAPify** — per subject, use `python -m shapify.fit_shape --config shapify/configs/measured.yaml` with body measurements on the first T-pose frame to produce `neutral_shape<P>.jpg.npy` (a 10-d β).
 5. **Pack into H5** — combine into one `emdb_eval.h5` with the structure above. Reference packer: `release_code/emdb_test/pack_emdb_res.py`.
 
 The scripts in `release_code/emdb_test/` are the unfiltered preprocessing code from the paper; they assume specific dataset roots and need path adjustments for your setup.

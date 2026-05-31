@@ -51,3 +51,9 @@ eval_results.txt
 # Backup copies of the experimental source (kept locally, not for the public repo)
 PoseDiT-pc/
 release_code/
+
+# Local test assets / outputs for shapify-video verification
+mesh/
+hf_space/
+openpose135_pth/
+shapify_video_test_results/

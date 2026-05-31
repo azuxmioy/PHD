@@ -11,6 +11,7 @@ setup(
     include_package_data=True,
     package_data={
         "phd": ["../assets/*"],
+        "shapify": ["configs/*.yaml"],
     },
     python_requires=">=3.8",
 )

@@ -1,26 +1,38 @@
 """
-Copyright (C) 2023  ETH Zurich, Manuel Kaufmann
+Compare fitted SMPL shape meshes in an interactive viewer.
 
-Script to visualize an EMDB sequence. Make sure to set the path of `EMDB_ROOT` and `SMPLX_MODELS` below.
+The script expects three directories of corresponding `.obj` meshes:
+ground truth, method 1, and method 2. It prints pelvis-relative joint errors
+and vertex errors, then colors each prediction by per-vertex error.
 
 Usage:
-  python visualize.py P8 68_outdoor_handstand
+  python -m shapify.visualize --gt_path compare/gt \
+      --method_1_path compare/ours_height \
+      --method_2_path compare/ours_height_weight
 """
 import argparse
 import os
 import trimesh
-from smplx import SMPL
 import matplotlib.pyplot as plt
 
 import numpy as np
-from aitviewer.configuration import CONFIG as C
-from aitviewer.viewer import Viewer
-from aitviewer.renderables.meshes import Meshes
 
-C.window_type = "pyglet"
+
+def _viewer_components():
+    try:
+        from aitviewer.configuration import CONFIG as C
+        from aitviewer.viewer import Viewer
+        from aitviewer.renderables.meshes import Meshes
+        from smplx import SMPL
+    except ImportError as exc:
+        raise SystemExit("shapify.visualize requires the optional aitviewer dependency.") from exc
+
+    C.window_type = "pyglet"
+    return Viewer, Meshes, SMPL
+
 
 def main(args):
-
+    Viewer, Meshes, SMPL = _viewer_components()
 
     gt_path = args.gt_path
     method_1_path = args.method_1_path
@@ -80,7 +92,7 @@ def main(args):
 
         colors2 = colormap(vertex_error2 * 20)
         viewer.scene.add(Meshes( pred_2_mesh.vertices, pred_2_mesh.faces,
-                                 vertex_colors=colors2, position=[4.0, 0.0, z_pos], name="Pred 1 "+ str(i)))
+                                 vertex_colors=colors2, position=[4.0, 0.0, z_pos], name="Pred 2 "+ str(i)))
 
         all_v1_mean.append(vertex_error1.mean())
         all_v1_max.append(max(vertex_error1))

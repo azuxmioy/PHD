@@ -24,16 +24,43 @@ JOINT_WEIGHT_VALUES = [
     0.5, 0.5, 0.5, 0.5, 0.5,
 ]
 
-WILD_DEMO_FEMALE_INDICES = {5, 6, 7, 8, 9}
-
-
 @dataclass(frozen=True)
 class ShapeFitConfig:
+    """Single-image shape fitter LRs (paper convention: subject-faces-camera).
+
+    Field names map to the pitch / yaw / roll / cam_z parameterization that
+    only makes sense when the body's global orient is the pelvis-to-camera
+    rotation and there is exactly one camera. Do **not** reuse this for the
+    multi-view video fitter -- see ``VideoShapeFitConfig``.
+    """
+
     lr_small: float = 1e-4
     lr_pitch: float = 1e-3
     lr_z: float = 1e-3
     lr_shape: float = 1e-2
+    lr_orient: float = 1e-3
     n_iter: int = 500
+
+
+@dataclass(frozen=True)
+class VideoShapeFitConfig:
+    """Multi-view (static-subject / moving-camera) shape fitter LRs.
+
+    The variables are documented in ``shapify/VIDEO_FITTING.md``. Field
+    names here correspond directly to the variable groups in that doc.
+    """
+
+    # Body in cam_0 frame (shared across all frames):
+    lr_betas: float = 1e-2          # 10-D SMPL shape
+    lr_body_pose: float = 1e-4       # 23 joints x 6D rotation; pose stays near PointDiT prior
+    lr_body_orient: float = 1e-3     # R_body_to_cam0 (6D rot)
+    lr_body_trans: float = 1e-2      # T_body_in_cam0 (3)
+
+    # Camera trajectory relative to cam_0 (one set per non-anchor frame):
+    lr_cam_rot: float = 1e-3         # R_cam_i_from_cam0 (6D rot)
+    lr_cam_trans: float = 1e-2       # T_cam_i_from_cam0 (3)
+
+    n_iter: int = 1500
 
 
 def default_device() -> torch.device:

@@ -1,0 +1,44 @@
+# SHAPify video (static-subject / moving-camera) fitter.
+# Variables and losses are documented in shapify/VIDEO_FITTING.md.
+
+subjects:
+input_dir: input_video
+output_dir: fit_shape_video
+pretrained_model_name_or_path: checkpoints/pointdit
+
+n_frames: 12
+focal_length: 1436.0
+seed: null
+
+guidance_scale: 1.5
+num_inference_steps: 5
+num_validation_images: 1
+n_sample: 1
+use_heatmap: true
+use_vertices: true
+
+openpose:
+  device: auto
+  weights_dir: null
+  no_hand: false
+  with_face: false
+  bbox_scale: 1.25
+  keypoint_thresh: 0.1
+
+loss:
+  mass_loss_weight: 10.0        # |mesh_mass - target_weight|
+  height_loss_weight: 100.0     # |mesh_height - target_height|
+  beta_reg_weight: 0.1          # ||beta - gender_prior||^2
+  body_pose_reg_weight: 1.0     # ||theta - PointDiT-mean-init||^2 ; high = pose stays close to 3D-plausible init
+  cam_smooth_weight: 0.0        # optional smoothness on relative camera trajectory
+
+optimizer:
+  # Body in cam_0 frame (shared):
+  lr_betas: 0.01
+  lr_body_pose: 0.0001          # tight: body_pose mostly comes from PointDiT prior, only fine-tune
+  lr_body_orient: 0.0           # R_body_to_cam0 FROZEN at PointDiT frame-0 estimate (kept for config compat, unused)
+  lr_body_trans: 0.01           # T_body_in_cam0
+  # Camera trajectory relative to cam_0 (per non-anchor frame):
+  lr_cam_rot: 0.001             # R_cam_i_from_cam0
+  lr_cam_trans: 0.01            # T_cam_i_from_cam0
+  n_iter: 1500
