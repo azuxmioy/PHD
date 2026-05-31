@@ -5,15 +5,15 @@
 #   bash fitting/evaluation/eval_emdb_all.sh <config_yaml> [<h5_path> <output_dir>]
 #
 # Examples:
-#   bash fitting/evaluation/eval_emdb_all.sh configs/eval/recommended.yaml
-#   bash fitting/evaluation/eval_emdb_all.sh configs/eval/causal_smooth.yaml \
+#   bash fitting/evaluation/eval_emdb_all.sh fitting/config/eval/recommended.yaml
+#   bash fitting/evaluation/eval_emdb_all.sh fitting/config/eval/causal_smooth.yaml \
 #       /data/emdb_eval.h5 results/causal_smooth/
 #
 # After all sequences finish, compute_metrics_h5.py runs automatically and the
 # table is written to <output_dir>/metrics.txt.
 set -euo pipefail
 
-CONFIG="${1:-configs/eval/recommended.yaml}"
+CONFIG="${1:-fitting/config/eval/recommended.yaml}"
 H5="${2:-${EMDB_H5:-/data/hohs2/datasets/emdb/emdb_eval.h5}}"
 OUT="${3:-results/$(basename "$CONFIG" .yaml)}"
 CACHED="${EMDB_CACHED:-/data/hohs2/datasets/emdb_cached/cached.h5}"

@@ -2,6 +2,7 @@
 
 This package owns SMPL body fitting entry points and evaluation:
 
+- `config/`: fitting and EMDB evaluation configs.
 - `single_image/fit_image.py`: fit one image folder.
 - `video/fit_video.py`: fit prepared in-the-wild video folders.
 - `video/gen_vid.py`: make videos from rendered fit frames.

@@ -12,22 +12,19 @@ This repo contains:
 
 ```
 phd/                    # python package
+├── config/             # PointDiT training configs
 ├── models/             # PointDiT, ViT backbone, heatmap head, sampling pipeline
 ├── fitter/             # SMPL fitter (point cloud → SMPL params)
 ├── utils/              # geometry, renderer, keypoint helpers
-└── data/               # BEDLAM dataset + config parser
+└── data/               # BEDLAM dataset, loaders, and preprocessing tools
 shapify/                # standalone shape estimation
-scripts/                # CLI entry points
-├── fit_image.py        # single-image / image-folder fitting
-├── fit_emdb.py         # EMDB evaluation (on-disk layout)
-├── eval_emdb_h5.py     # EMDB evaluation (H5 bundle, batched fitting)
-├── fit_video.py        # in-the-wild video fitting w/ temporal smoothing
-├── gen_vid.py          # turn rendered frames into mp4
-├── train.py            # PointDiT training
-├── train.sh            # accelerate launcher
-└── _*.py               # internal helpers (fit_batch, smoother, etc.)
-tools/bedlam/           # BEDLAM H5 preprocessing scripts
-configs/                # training config
+fitting/                # body fitting scripts, demos, shared fitting code
+├── config/eval/        # EMDB fitting/evaluation configs
+├── single_image/       # single-image / image-folder fitting
+├── video/              # in-the-wild video fitting and video generation
+├── emdb/               # EMDB fitting from on-disk frame layout
+├── evaluation/         # EMDB H5 benchmark and metrics
+└── shared/             # reusable fitting optimizers and smoothers
 assets/                 # mean_points.pkl + diffusion scheduler config
 demo_data/              # tiny single-image example
 checkpoints/            # PointDiT checkpoint (download separately)
@@ -93,7 +90,7 @@ You need three things that are **not** in this repo:
 ## Quick start: single-image fitting
 
 ```bash
-python scripts/fit_image.py \
+python fitting/single_image/fit_image.py \
     --test_data_dir demo_data/single \
     --exp_name demo_out \
     --pretrained_model_name_or_path checkpoints/pointdit \
@@ -140,7 +137,7 @@ SMPL_MODEL_PATH=body_models/smpl python -m shapify.fit_shape_wild
 
 ## EMDB evaluation
 
-The EMDB benchmark from the paper. All variants are driven by YAML configs in [configs/eval/](configs/eval/) — one CLI per variant, no need to remember flag combinations.
+The EMDB benchmark from the paper. All variants are driven by YAML configs in [fitting/config/eval/](fitting/config/eval/) — one CLI per variant, no need to remember flag combinations.
 
 ### Inputs
 
@@ -170,8 +167,8 @@ You need:
 ### One sequence
 
 ```bash
-python scripts/eval_emdb_h5.py \
-    --config configs/eval/recommended.yaml \
+python fitting/evaluation/eval_emdb_h5.py \
+    --config fitting/config/eval/recommended.yaml \
     --h5 /path/to/emdb_eval.h5 \
     --sequence P1_14_outdoor_climb \
     --output_dir results/recommended/
@@ -184,7 +181,7 @@ Output: `results/recommended/P1_14_outdoor_climb_params.npz` containing
 
 ```bash
 EMDB_H5=/path/to/emdb_eval.h5 EMDB_CACHED=/path/to/cached.h5 \
-    bash scripts/eval_emdb_all.sh configs/eval/recommended.yaml
+    bash fitting/evaluation/eval_emdb_all.sh fitting/config/eval/recommended.yaml
 # default output_dir: results/<config-basename>/
 ```
 
@@ -207,7 +204,7 @@ After all 17 finish, this calls `compare_metrics_h5.py` (or `compute_metrics_h5.
 Post-fit LBFGS smoother on top of any `eval_emdb_h5.py` output. Mostly for demo videos:
 
 ```bash
-python scripts/smooth_emdb_h5.py \
+python fitting/evaluation/smooth_emdb_h5.py \
     --h5 /path/to/emdb_eval.h5 \
     --sequence P1_14_outdoor_climb \
     --input_npz results/recommended/P1_14_outdoor_climb_params.npz \
@@ -220,7 +217,7 @@ Apply over all 17 with a one-liner:
 ```bash
 for f in results/recommended/*_params.npz; do
     seq=$(basename "$f" _params.npz)
-    python scripts/smooth_emdb_h5.py --h5 $EMDB_H5 --sequence $seq \
+    python fitting/evaluation/smooth_emdb_h5.py --h5 $EMDB_H5 --sequence $seq \
         --input_npz "$f" --output_npz "results/recommended_smooth/${seq}_params.npz" --n_iter 10
 done
 ```
@@ -271,10 +268,10 @@ The scripts in `release_code/emdb_test/` are the unfiltered preprocessing code f
 
 ### Legacy from-disk evaluation
 
-`scripts/fit_emdb.py` is the pre-H5 pipeline that reads the per-frame on-disk layout (`rgb/`, `cropped_new/`, `bbox/`, `sapiens_1b/`, `camerahmr/`). Kept for backward compat; superseded by `eval_emdb_h5.py` + the YAML configs.
+`fitting/emdb/fit_emdb.py` is the pre-H5 pipeline that reads the per-frame on-disk layout (`rgb/`, `cropped_new/`, `bbox/`, `sapiens_1b/`, `camerahmr/`). Kept for backward compat; superseded by `fitting/evaluation/eval_emdb_h5.py` + the YAML configs.
 
 ```bash
-python scripts/fit_emdb.py \
+python fitting/emdb/fit_emdb.py \
     --test_data_dir ./emdb \
     --shape_dir ./guess_shape \
     --subjects P1 P8 \
@@ -283,10 +280,10 @@ python scripts/fit_emdb.py \
 
 ## In-the-wild videos
 
-`scripts/fit_video.py` expects a prepared video folder with `rgb/`, `cropped_new/`, `bbox/`, `openpose/`, and `neutral_shape.npy` under `<root>/<subject>/<sequence>/`. It writes rendered overlays, meshes, and SMPL params to `<sequence>/<exp_name>/`.
+`fitting/video/fit_video.py` expects a prepared video folder with `rgb/`, `cropped_new/`, `bbox/`, `openpose/`, and `neutral_shape.npy` under `<root>/<subject>/<sequence>/`. It writes rendered overlays, meshes, and SMPL params to `<sequence>/<exp_name>/`.
 
 ```bash
-python scripts/fit_video.py \
+python fitting/video/fit_video.py \
     --test_data_dir ./video_data \
     --subjects data \
     --sequences v105 \
@@ -297,7 +294,7 @@ python scripts/fit_video.py \
 Create an mp4 from rendered overlays:
 
 ```bash
-python scripts/gen_vid.py \
+python fitting/video/gen_vid.py \
     --image_dir ./video_data/data/v105/video_fit \
     --output ./video_data/data/v105/video_fit/fitter.mp4 \
     --fps 30
@@ -305,11 +302,11 @@ python scripts/gen_vid.py \
 
 ## Training PointDiT
 
-Edit `configs/train.yaml` to point `dataset.train_data_dir` at your BEDLAM H5 shards (see `tools/bedlam/` for preprocessing scripts). Then:
+Edit `phd/config/train.yaml` to point `dataset.train_data_dir` at your BEDLAM H5 shards (see `phd/data/bedlam/` for preprocessing scripts). Then:
 
 ```bash
 accelerate config             # one-time
-bash scripts/train.sh         # or: accelerate launch scripts/train.py
+bash phd/train.sh             # or: accelerate launch phd/train.py --config phd/config/train.yaml
 ```
 
 The paper uses a two-stage curriculum:

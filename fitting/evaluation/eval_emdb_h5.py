@@ -135,7 +135,7 @@ def main():
     # then build the real parser with those defaults and re-parse.
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument('--config', default=None,
-                     help='YAML config (see configs/eval/*.yaml) setting fit/pipeline/loss '
+                     help='YAML config (see fitting/config/eval/*.yaml) setting fit/pipeline/loss '
                           'defaults. CLI args take precedence over YAML.')
     pre_args, _ = pre.parse_known_args()
 

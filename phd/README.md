@@ -3,6 +3,7 @@
 This package owns the shape-conditioned 3D prior:
 
 - `train.py` and `train.sh`: PointDiT training entry points.
+- `config/`: PointDiT training configs.
 - `inference.py`: shared PointDiT inference factories and image/keypoint loaders.
 - `models/`: PointDiT, ViT, heatmap head, and pipeline modules.
 - `data/`: PointDiT dataset loaders, split definitions, and BEDLAM preprocessing tools.

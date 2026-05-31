@@ -17,7 +17,7 @@ def parse_options():
     global_group.add_argument(
         "--config",
         type=str,
-        default='configs/train.yaml',
+        default='phd/config/train.yaml',
         help='Path to config file to replace defaults')
     global_group.add_argument(
         "--pretrained_model_name_or_path",
