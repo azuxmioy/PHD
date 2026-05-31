@@ -150,7 +150,7 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
 
         # Optional GMoF-robust 2D keypoint residual (sigma in image pixels).
         # When args.gmof_sigma > 0, replace L2 by sigma^2 * d^2 / (sigma^2 + d^2),
-        # downweighting outliers. The smoother in _smoother.py uses sigma=100.
+        # downweighting outliers. The smoother in fitting/shared/smoother.py uses sigma=100.
         gmof_sigma = getattr(args, 'gmof_sigma', 0.0)
         diff = gt_body_kps - pred_body_kps
         if gmof_sigma > 0:
@@ -231,7 +231,7 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
             smooth_loss = smooth_loss + intra_loss * getattr(args, 'smooth_intra_weight', 10.0)
 
         # ----- Smoother-style 2nd-difference jitter + regularize-to-init
-        # (borrowed from scripts/_smoother.py — usable when fitting >=3 frames
+        # (borrowed from fitting/shared/smoother.py — usable when fitting >=3 frames
         # together as a sequence). Each term contributes via args.w_jitter,
         # args.w_reg_init (default 0 = off).
         w_jitter = getattr(args, 'w_jitter', 0.0)
@@ -246,7 +246,7 @@ def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params
                 # 2nd-difference jitter (acceleration) along the B (time) axis.
                 def jitter(x):
                     return ((x[2:] + x[:-2] - 2 * x[1:-1]) ** 2).sum(dim=-1).mean()
-                # Head/neck (SMPL joints 11, 14) gets 10x weight, as in _smoother.py
+                # Head/neck (SMPL joints 11, 14) gets 10x weight, as in fitting/shared/smoother.py
                 pose_per_joint = opt_poses.view(batch_size, n_sample, 23, 6)
                 head_jitter = ((pose_per_joint[2:, :, [11, 14]] + pose_per_joint[:-2, :, [11, 14]]
                                 - 2 * pose_per_joint[1:-1, :, [11, 14]]) ** 2).sum(dim=-1).mean()

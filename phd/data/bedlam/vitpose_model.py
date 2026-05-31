@@ -6,6 +6,7 @@ https://github.com/vye16/slahmr/blob/main/slahmr/preproc/vitpose_model.py
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -20,16 +21,14 @@ from mmpose.apis import (
 
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
-# project root directory
-ROOT_DIR = os.path.abspath(f"{__file__}/../../")
-VIT_DIR = os.path.join(ROOT_DIR, "ViTPose")
+BEDLAM_DIR = Path(__file__).resolve().parent
 
 
 class ViTPoseModel(object):
     MODEL_DICT = {
         "ViTPose-G (multi-task train, COCO)": {
-            "config": f"ViTPose_huge_coco_256x192.py",
-            "model": f"vitpose-h-multi-coco.pth",
+            "config": str(BEDLAM_DIR / "ViTPose_huge_coco_256x192.py"),
+            "model": os.environ.get("VITPOSE_CHECKPOINT", str(BEDLAM_DIR / "vitpose-h-multi-coco.pth")),
         },
     }
 

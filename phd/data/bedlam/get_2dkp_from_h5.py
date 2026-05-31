@@ -13,7 +13,7 @@ import torch
 from tqdm import tqdm
 
 from phd.data.splits import BEDLAM_TRAIN_SPLITS
-from vitpose_model import ViTPoseModel
+from phd.data.bedlam.vitpose_model import ViTPoseModel
 
 
 def parse_args():

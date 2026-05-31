@@ -8,4 +8,4 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-accelerate launch scripts/train.py --config configs/train.yaml "$@"
+accelerate launch phd/train.py --config configs/train.yaml "$@"

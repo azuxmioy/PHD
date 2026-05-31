@@ -19,16 +19,21 @@ from phd.inference import (
     create_pointdit_pipeline,
     create_smpl_fitter,
     find_cam_pos,
+    load_openpose_json,
 )
+from phd.point_stats import load_point_statistics
+from phd.utils.geometry import rot6d_to_rotmat, aa_to_rotmat
 from phd.utils.renderer import Renderer
-from _fit_batch_multi import fit_batch
+from fitting.shared.fit_batch_wild import fit_batch
 
+from phd.surface_kp import SURFACE_KP
 from phd.paths import (
     smpl_model_path,
     smplfitter_data_root,
 )
+
 os.environ.setdefault('DATA_ROOT', smplfitter_data_root())
-from phd.utils.kps import draw_openpose_keypoints
+mean_points, std_points = load_point_statistics()
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
@@ -56,6 +61,7 @@ def main(args):
             x for x in sorted(os.listdir(args.test_data_dir))
             if os.path.isdir(os.path.join(args.test_data_dir, x)) and not x.startswith('.')
         ]
+
     for person_name in person_list:
     
         take_list = [x for x in sorted(os.listdir(os.path.join(args.test_data_dir, person_name))) if 
@@ -66,80 +72,134 @@ def main(args):
         for take_name in take_list:
 
             folder_path = os.path.join(args.test_data_dir, person_name, take_name)
-            meta_data = person_name + '_' + take_name + '_data.pkl'
-            meta_file = os.path.join(folder_path, meta_data)
-            print(folder_path)
-
-            meta_data = pickle.load(open(meta_file, 'rb'))
-            
-            invalid_idxs = meta_data['bboxes']['invalid_idxs']
-            K = meta_data['camera']['intrinsics']
-
             crop_path = os.path.join(folder_path, 'cropped_new')
             bbox_path = os.path.join(folder_path, 'bbox')
-            kp_path = os.path.join(folder_path, 'sapiens_1b')
-            full_image_path = os.path.join(folder_path, 'images')
-            shape_path = os.path.join(args.shape_dir, 'neutral_shape' + person_name + '.jpg.npy')
-
-            init_path = os.path.join(folder_path, 'camerahmr')
+            kp_path = os.path.join(folder_path, 'openpose')
+            full_image_path = os.path.join(folder_path, 'rgb')
+            shape_path = os.path.join(folder_path, 'neutral_shape.npy')
 
             save_path = os.path.join(args.test_data_dir, person_name, take_name, args.exp_name)
             os.makedirs(save_path, exist_ok=True)
             
-            image_list = [x for x in sorted(os.listdir(full_image_path)) if x.endswith('.jpg')]
+            image_list = [x for x in sorted(os.listdir(full_image_path)) if x.endswith('.jpg') and not x.startswith('.')]
             prev_params = None
-            image_list = [image_list[0]] + image_list
             for idx, im in tqdm(enumerate(image_list)):
 
                 file_name = im.split('.')[0]
 
-                if int(file_name) in invalid_idxs:
-                    continue
-
                 full_image = cv2.imread(os.path.join(os.path.join(full_image_path, im)))
                 H, W, C = full_image.shape
+                focal = args.focal_length
+                K = np.array([[focal, 0, W/2],
+                          [0, focal, H/2],
+                          [0, 0, 1]])
 
-                init_dict = pickle.load(open(os.path.join(init_path, file_name + '.jpg_out.pkl'), 'rb'))
-
-                with open(os.path.join(kp_path, file_name + '.json'), 'r') as f:
-                    data = json.load(f)['0']
-                    np_pose = np.array(data).reshape(-1, 3)
-                    confidence = np_pose [:, 2]
-                    np_pose[np.where(confidence < 0.5), 2] = 0 
-                    full_kp = torch.from_numpy(np_pose)
-
+                full_kp = load_openpose_json(os.path.join(kp_path, file_name + '_keypoints.json'), thres=0.1)
+                confidence = full_kp[:, 2]
+                full_kp = torch.tensor(full_kp)
+                
 
                 with open(os.path.join(bbox_path, file_name + '.json'), 'r') as file:
                     bbox_dict = json.load(file)
                     bbox = bbox_dict['bbox']
                     cam_R = torch.tensor(bbox_dict['cam_R'])
                     cam_R_inv = torch.inverse(cam_R)
-        
+
                 rect_image = Image.open(os.path.join(crop_path, file_name + '.jpg'))
                 fit_betas = np.load(shape_path)
                 data = {}
                 data['input_tensor'] = IMAGE_TRANSFORM(rect_image).unsqueeze(0).to(device)
-                data['cond_betas']   = torch.from_numpy(fit_betas).view(1, -1).to(device)
+                data['cond_betas']   = torch.from_numpy(fit_betas).view(1, -1).float().to(device)
 
-                smpl_output = SMPL_neutral( global_orient=init_dict['global_orient'].unsqueeze(0).to(device).detach(),
-                              body_pose= init_dict['body_pose'].unsqueeze(0).to(device).detach(),
-                              betas=data['cond_betas'].to(device).detach(),
+                with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
+                    
+                    if prev_params is None:
+                        poses, _, output_dict = pipeline(data,
+                        args,
+                        num_images_per_prompt = args.num_validation_images,
+                        num_inference_steps=args.num_inference_steps,
+                        generator=generator,
+                        guidance_scale=args.guidance_scale,
+                        mode = 'test',
+                        return_dict = True
+                        )
+                    
+                    else:
+                        prev_points = torch.cat([prev_params['pred_vertices'][:, SURFACE_KP], prev_params['pred_joints']], dim=1).detach()
+                        prev_points = (prev_points - mean_points[None, ...].to(prev_points.device)) / std_points[None, ...].to(prev_points.device)
+
+                        poses, _, output_dict = pipeline(data,
+                        args,
+                        num_images_per_prompt = args.num_validation_images,
+                        num_inference_steps=args.num_inference_steps,
+                        generator=generator,
+                        guidance_scale=args.guidance_scale,
+                        mode = 'test',
+                        return_dict = True,
+                        gt_samples = prev_points,
+                        begin_index=0
+                    )
+                    
+
+                # average_multiple_samples
+                poses = torch.mean(poses, dim=0, keepdim=True)
+
+                if args.use_vertices:
+                    fitter = fitter.to(poses.device)
+                    pred_points = mean_points[None, ...].to(poses.device) + poses.detach() * std_points[None, ...].to(poses.device)
+
+                    surface_kp = pred_points[:, :len(SURFACE_KP)]
+                    joints = pred_points[:, len(SURFACE_KP):len(SURFACE_KP)+24 ]
+                    fit_res = fitter.fit(surface_kp, joints, n_iter=3, beta_regularizer=1, initial_shape_betas=data['cond_betas'].repeat(surface_kp.shape[0], 1))
+                    
+                    if args.debug:
+                        for k, v in output_dict.items():
+                            pc = mean_points.to(v.device) + v[0] * std_points.to(v.device)
+                            cloud=trimesh.PointCloud(pc.detach().cpu().numpy())
+                            cloud.export(os.path.join(save_path, file_name + '_step%s' % k + '.ply'))
+
+                    fit_res['pose_rotvecs'][:, -12:] = 0.0
+                    fit_pose_rotmat =  aa_to_rotmat(fit_res['pose_rotvecs'].view(-1, 3)).view(-1, 24, 3, 3)
+
+                    derect_orient = fit_pose_rotmat[:, 0]
+                    body_pose = fit_pose_rotmat[:, 1:]
+                    smpl_output = SMPL_neutral( global_orient=derect_orient.unsqueeze(1),
+                              body_pose= body_pose ,
+                              betas=data['cond_betas'],
                               pose2rot=False
                               )
 
-                sample_smpl_V = smpl_output.vertices.detach().cpu().numpy()
-                sample_smpl_J = smpl_output.joints.detach().cpu()[:, SMPL_TO_OPENPOSE]
+                    sample_smpl_V = smpl_output.vertices.detach().cpu().numpy()
+                    sample_smpl_J = smpl_output.joints.detach().cpu()[:, SMPL_TO_OPENPOSE]
+
+                else:
+                    pose_rotmat = rot6d_to_rotmat(poses.view(-1, 6)).view(args.num_validation_images, -1, 3, 3)
+                    derect_orient = pose_rotmat[:, 0]
+                    body_pose = pose_rotmat[:, 1:]
+                    smpl_output = SMPL_neutral( global_orient=derect_orient.unsqueeze(1),
+                              body_pose= body_pose ,
+                              betas=data['cond_betas'],
+                              pose2rot=False
+                              )
+                    
+                    sample_smpl_V = smpl_output.vertices.detach().cpu().numpy()
+                    sample_smpl_J = smpl_output.joints.detach().cpu()[:, SMPL_TO_OPENPOSE]
+                
 
                 fit_body_joints = list(range(25))
-                if np.sum(confidence[fit_body_joints] < 0.4) > 20:
+                if np.all(confidence[fit_body_joints] < 0.1):
                     offset_x = (bbox[0] - W / 2) / K[0, 0]
                     offset_y = (bbox[1] - H / 2) / K[0, 0]
-                    offset_z = -init_dict['pred_cam_t'][2]
+                    offset_z = -2.0
                     cam_offset = torch.tensor([offset_x * offset_z, offset_y * offset_z, offset_z]).unsqueeze(0).float()
                 else:
                     cam_offset = find_cam_pos(sample_smpl_J[:, fit_body_joints],
                                            full_kp[fit_body_joints].unsqueeze(0), K)
+                if idx != 0:
+                    cam_offset = prev_params['camera'].detach()
 
+                if args.debug:
+                    print(cam_offset)
 
                 render_init = renderer.render_rgba( sample_smpl_V[0],
                             cam_t = -cam_offset[0].detach().cpu().numpy(),
@@ -154,17 +214,18 @@ def main(args):
                 img_cv2[...,:3] = np.array(full_image) / 255.0
                 input_img_overlay = img_cv2[:,:,:3] * (1-render_init[:,:,3:]) + render_init[:,:,:3] * render_init[:,:,3:]
                 input_img_overlay = (input_img_overlay * 255).astype(np.uint8)
-                kp_img = draw_openpose_keypoints(full_kp, input_img_overlay)
+                cv2.imwrite(os.path.join(save_path, file_name + '_init.jpg'), input_img_overlay)
 
-                cv2.imwrite(os.path.join(save_path, file_name + '_init.jpg'), kp_img)
-                t = trimesh.Trimesh(vertices = sample_smpl_V[0],
-                                    faces = SMPL_neutral.faces,
-                                    process=False)
-                t.export(os.path.join(save_path, file_name + '_init.obj'))
+                
+                fit_res['pose_rotvecs'][:, -12:] = 0.0
+                fit_pose_rotmat =  aa_to_rotmat(fit_res['pose_rotvecs'].view(-1, 3)).view(-1, 24, 3, 3)
+                derect_orient = fit_pose_rotmat[:, 0]
+                body_pose = fit_pose_rotmat[:, 1:]
+                
 
                 init_params={
-                    'body_pose': init_dict['body_pose'].unsqueeze(0).to(device).detach(),
-                    'global_orient': init_dict['global_orient'].unsqueeze(0).to(device).detach(),
+                    'body_pose': body_pose.detach(),
+                    'global_orient': derect_orient.detach(),
                     'camera': cam_offset.to(device).detach(),
                     'cam_R_inv': cam_R_inv.to(device).detach()
                 }
@@ -176,6 +237,10 @@ def main(args):
                               body_pose=out_params['body_pose'],
                               betas=data['cond_betas'],
                               pose2rot=False)
+                
+                prev_params['pred_vertices'] = smpl_output.vertices.detach()
+                prev_params['pred_joints'] = smpl_output.joints.detach()
+
                 v = smpl_output.vertices[0].detach().cpu().numpy()
                 render_fit = renderer.render_rgba(v,
                             cam_t = -out_params['camera'][0].cpu().numpy(),
@@ -213,29 +278,10 @@ if __name__ == "__main__":
         "-t",
         "--test_data_dir",
         type=str,
-        default="./emdb",
+        default="./",
         help=(
-            "Path to the EMDB dataset root. Subfolders are P{0..9}/{seq}/ with images/, "
-            "sapiens_1b/, bbox/, cropped_new/, and camerahmr/ inside each sequence."
+            "The path to the dataset. The directory should contain a images folder and a smplx meshes folder."
         ),
-    )
-    parser.add_argument(
-        "--shape_dir",
-        type=str,
-        default="./guess_shape",
-        help="Directory containing per-subject SHAPify outputs (neutral_shape<name>.jpg.npy).",
-    )
-    parser.add_argument(
-        "--subjects",
-        nargs="+",
-        default=None,
-        help="Optional EMDB subject folders to run, for example P1 P8. Defaults to all subjects found.",
-    )
-    parser.add_argument(
-        "--sequences",
-        nargs="+",
-        default=None,
-        help="Optional sequence folder names inside each subject. Defaults to all sequences found.",
     )
     parser.add_argument(
         "-o",
@@ -249,14 +295,32 @@ if __name__ == "__main__":
     parser.add_argument(
         "--exp_name",
         type=str,
-        default="emdb_fit",
-        help="Name of the output folder written under each EMDB sequence.",
+        default="video_fit",
+        help="Name of the output folder written under each video sequence.",
     )
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
         default='checkpoints/pointdit',
         help="Path to pretrained model or model identifier from huggingface.co/models.",
+    )
+    parser.add_argument(
+        "--subjects",
+        nargs="+",
+        default=None,
+        help="Optional subject folders under test_data_dir. Defaults to all folders found.",
+    )
+    parser.add_argument(
+        "--sequences",
+        nargs="+",
+        default=None,
+        help="Optional sequence folders under each subject. Defaults to all folders found.",
+    )
+    parser.add_argument(
+        "--focal_length",
+        type=float,
+        default=1424.58,
+        help="Fallback focal length used when fitting videos without per-frame intrinsics.",
     )
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument(
@@ -279,12 +343,6 @@ if __name__ == "__main__":
         type=int,
         default=5,
         help="Number of inference steps",
-    )
-    parser.add_argument(
-        "--n_sample",
-        type=int,
-        default=4,
-        help="Number of PointDiT samples per input frame; final result averages over n_sample.",
     )
     parser.add_argument(
         "--use_heatmap",

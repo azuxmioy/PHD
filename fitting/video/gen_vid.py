@@ -14,7 +14,7 @@ def parse_args():
     parser.add_argument(
         "--image_dir",
         required=True,
-        help="Directory containing rendered frames, for example outputs from scripts/fit_video.py.",
+        help="Directory containing rendered frames, for example outputs from fitting/video/fit_video.py.",
     )
     parser.add_argument(
         "--pattern",

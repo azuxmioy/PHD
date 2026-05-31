@@ -12,7 +12,7 @@ Mirrors the procedure of release_code/emdb_test/compute_metrics.py:
   6. PA-MPJPE/PA-MVE: same after Procrustes alignment (scale+R+t).
 
 Usage:
-    python scripts/compute_metrics_h5.py \
+    python fitting/evaluation/compute_metrics_h5.py \
         --h5 /path/to/emdb_eval.h5 \
         --results_dir /path/to/results/emdb_h5_all
 """

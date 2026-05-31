@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from copy import copy
 
-from _fit_batch_multi import fit_batch as _fit_batch_multi
+from fitting.shared.fit_batch_multi import fit_batch as _fit_batch_multi
 
 
 def fit_batch(SMPL_neutral, fitter, data, args, generator, pipeline, init_params, kp_2d, K, bbox, keypoint_type="vit17"):

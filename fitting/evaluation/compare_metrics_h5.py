@@ -12,7 +12,7 @@ We use ``mesh_fit - camera`` for the camera-frame vertices (matches the
 ``SMPL_J - camera`` convention in fit_batch).
 
 Usage:
-    python scripts/compare_metrics_h5.py \
+    python fitting/evaluation/compare_metrics_h5.py \
         --gt /data/hohs2/datasets/emdb/emdb_eval.h5 \
         --ours_dir /data/hohs2/outputs/emdb_h5_all \
         --cached /data/hohs2/datasets/emdb_cached/cached.h5

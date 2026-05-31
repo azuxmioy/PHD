@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Run scripts/eval_emdb_h5.py over every sequence in the EMDB H5 bundle.
+# Run fitting/evaluation/eval_emdb_h5.py over every sequence in the EMDB H5 bundle.
 #
 # Usage:
-#   bash scripts/eval_emdb_all.sh <config_yaml> [<h5_path> <output_dir>]
+#   bash fitting/evaluation/eval_emdb_all.sh <config_yaml> [<h5_path> <output_dir>]
 #
 # Examples:
-#   bash scripts/eval_emdb_all.sh configs/eval/recommended.yaml
-#   bash scripts/eval_emdb_all.sh configs/eval/causal_smooth.yaml \
+#   bash fitting/evaluation/eval_emdb_all.sh configs/eval/recommended.yaml
+#   bash fitting/evaluation/eval_emdb_all.sh configs/eval/causal_smooth.yaml \
 #       /data/emdb_eval.h5 results/causal_smooth/
 #
 # After all sequences finish, compute_metrics_h5.py runs automatically and the
@@ -37,7 +37,7 @@ for seq in "${SEQUENCES[@]}"; do
         continue
     fi
     echo "=== $seq ==="
-    python scripts/eval_emdb_h5.py \
+    python fitting/evaluation/eval_emdb_h5.py \
         --config "$CONFIG" \
         --h5 "$H5" --sequence "$seq" \
         --output_dir "$OUT" 2>&1 | tail -3
@@ -46,11 +46,11 @@ date
 echo "=== Computing metrics ==="
 
 if [ -f "$CACHED" ]; then
-    python scripts/compare_metrics_h5.py \
+    python fitting/evaluation/compare_metrics_h5.py \
         --gt "$H5" --ours_dir "$OUT" --cached "$CACHED" \
         2>&1 | tee "$OUT/metrics.txt"
 else
-    python scripts/compute_metrics_h5.py \
+    python fitting/evaluation/compute_metrics_h5.py \
         --h5 "$H5" --results_dir "$OUT" \
         2>&1 | tee "$OUT/metrics.txt"
 fi

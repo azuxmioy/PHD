@@ -45,11 +45,9 @@ smpl_models/
 !body_models/.gitkeep
 
 # Local experiment dumps (top-level only — don't exclude demo_data/single/)
-/fitting/
 /single/
 eval_results.txt
 
 # Backup copies of the experimental source (kept locally, not for the public repo)
 PoseDiT-pc/
 release_code/
-

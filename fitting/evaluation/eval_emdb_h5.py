@@ -9,12 +9,12 @@ The H5 groups every test sequence under top-level keys like
   fit_betas (10,) / gt_betas (10,) / gt_pose (N,72) / idx (N+drops,) /
   vert_cam (N,6890,3)
 
-This script loads frames from the H5 and reuses the existing
-``_fit_batch_multi.fit_batch``. It supports batched fitting: B frames
+This script loads frames from the H5 and reuses
+``fitting.shared.fit_batch_multi.fit_batch``. It supports batched fitting: B frames
 share one PointDiT forward + one optimizer.
 
 Usage:
-    python scripts/eval_emdb_h5.py \\
+    python fitting/evaluation/eval_emdb_h5.py \\
         --h5 /data/hohs2/datasets/emdb/emdb_eval.h5 \\
         --sequence P1_14_outdoor_climb \\
         --pretrained_model_name_or_path checkpoints/pointdit \\
@@ -23,7 +23,6 @@ Usage:
 """
 import argparse
 import os
-import sys
 
 import h5py
 import numpy as np
@@ -31,9 +30,6 @@ import torch
 import smplx
 from tqdm import tqdm
 from accelerate.utils import set_seed
-
-# Make sibling helpers (_fit_batch_multi.py) importable.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from phd.inference import (
     IMAGE_TRANSFORM,
@@ -56,7 +52,7 @@ from diffusers import FlowMatchEulerDiscreteScheduler
 
 os.environ.setdefault('DATA_ROOT', smplfitter_data_root())
 
-from _fit_batch_multi import fit_batch
+from fitting.shared.fit_batch_multi import fit_batch
 
 def iter_h5_batches(h5_path, sequence, batch_size, device, max_frames=None):
     """Yield batched data dicts ready for fit_batch.
@@ -176,13 +172,13 @@ def main():
     parser.add_argument('--w_jitter', type=float, default=0.0,
                         help='Weight on 2nd-difference temporal jitter (acceleration) over '
                              'cam/orient/pose + first-difference 3D-joint smoothness + 10x '
-                             'jitter on head/neck joints. Borrowed from _smoother.py.')
+                             'jitter on head/neck joints. Borrowed from fitting/shared/smoother.py.')
     parser.add_argument('--w_reg_init', type=float, default=0.0,
                         help='Weight on regularize-toward-init term (pose + orient deviation '
                              'from CameraHMR init).')
     parser.add_argument('--gmof_sigma', type=float, default=0.0,
                         help='If >0, use GMoF-robust 2D keypoint loss with this sigma (pixels). '
-                             '_smoother.py uses 100. 0 keeps the plain L2 norm.')
+                             'fitting/shared/smoother.py uses 100. 0 keeps the plain L2 norm.')
     parser.add_argument('--per_frame_loss', action='store_true',
                         help='Use sum-over-batch (mean-over-joints) reduction so each frame '
                              'contributes single-frame-magnitude gradient. Closes the batched '

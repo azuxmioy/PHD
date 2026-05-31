@@ -32,7 +32,7 @@ from phd.paths import (
     smplfitter_data_root,
 )
 
-from _fit_batch import fit_batch
+from fitting.shared.fit_batch import fit_batch
 
 os.environ.setdefault("DATA_ROOT", smplfitter_data_root())
 mean_points, std_points = load_point_statistics()

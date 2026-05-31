@@ -11,7 +11,7 @@ Output is a new .npz with smoothed params, optionally with rendered
 per-frame overlays.
 
 Usage:
-    python scripts/smooth_emdb_h5.py \\
+    python fitting/evaluation/smooth_emdb_h5.py \\
         --h5 /data/hohs2/datasets/emdb/emdb_eval.h5 \\
         --sequence P1_14_outdoor_climb \\
         --input_npz results/emdb_h5/P1_14_outdoor_climb_params.npz \\
@@ -37,7 +37,7 @@ from phd.utils.geometry import (
     perspective_projection,
 )
 
-# Loss weights (match scripts/_smoother.py)
+# Loss weights (match fitting/shared/smoother.py)
 W_REG = 5.0
 W_SMOOTH = 20.0
 W_KP2D = 5.0

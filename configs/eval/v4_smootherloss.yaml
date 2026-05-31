@@ -1,5 +1,5 @@
 # V4 (heavy smoother): batched setup + smoother-style losses from
-# scripts/_smoother.py (GMoF reprojection, 2nd-diff jitter on cam/orient/pose
+# fitting/shared/smoother.py (GMoF reprojection, 2nd-diff jitter on cam/orient/pose
 # + 10x head-joint jitter, regularize-toward-init).
 #
 # Use for demo videos where trajectory smoothness matters more than
