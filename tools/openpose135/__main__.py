@@ -2,18 +2,18 @@
 
 Examples:
     # Single image, JSON only
-    python scripts/openpose135.py --image foo.jpg --write_json out/
+    python -m tools.openpose135 --image foo.jpg --write_json out/
 
     # Folder of images, JSON + overlays
-    python scripts/openpose135.py --image_dir rgb/ \\
+    python -m tools.openpose135 --image_dir rgb/ \\
         --write_json keypoints/ --write_images overlays/
 
     # Video → per-frame JSON + composited overlay video
-    python scripts/openpose135.py --video clip.mp4 \\
+    python -m tools.openpose135 --video clip.mp4 \\
         --write_json keypoints/ --write_video overlay.mp4
 
     # Skip face + cap to 1 person
-    python scripts/openpose135.py --image_dir rgb/ --write_json kp/ \\
+    python -m tools.openpose135 --image_dir rgb/ --write_json kp/ \\
         --no_face --number_people_max 1
 
 Outputs follow the CMU OpenPose layout. JSON files are named
@@ -24,9 +24,6 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-
-# Make `tools.openpose135` importable when run as a script.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Heavy imports (torch / cv2 / detector) are deferred to main() so --help works
 # even when the inference stack is partially broken.
@@ -86,7 +83,7 @@ def _resolve_weight_paths(args: argparse.Namespace) -> dict | None:
             "face": str(d / "facenet.pth"),
         }
     if args.hf_repo is not None:
-        from tools.openpose135.weights import resolve_weights
+        from .weights import resolve_weights
         return resolve_weights(repo_id=args.hf_repo)
     return None  # default: detector calls resolve_weights() itself
 
@@ -107,8 +104,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     from tqdm import tqdm
-    from tools.openpose135.detector import OpenPose135Detector
-    from tools.openpose135.runtime import process_image, process_image_dir, process_video
+    from .detector import OpenPose135Detector
+    from .runtime import process_image, process_image_dir, process_video
 
     device = _resolve_device(args.device)
     weight_paths = _resolve_weight_paths(args)

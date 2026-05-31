@@ -259,7 +259,7 @@ You need raw EMDB plus three external models:
 Pipeline:
 
 1. **Extract person crops + bbox** — `release_code/emdb_test/extract_bbox.py` reads EMDB's per-frame metadata, generates 256×256 crops, writes `bbox/<n>.json` per frame.
-2. **Run 2D keypoints** — either `release_code/emdb_test/get_2dkp.py` (Sapiens-1B → `sapiens_1b/<n>.json`) or `python scripts/openpose135.py --image_dir <rgb_dir> --write_json <openpose_dir>` (OpenPose-135 → `<openpose_dir>/<n>_keypoints.json`). Both produce the 135-keypoint OpenPose layout `phd.inference.load_openpose_json` reads.
+2. **Run 2D keypoints** — either `release_code/emdb_test/get_2dkp.py` (Sapiens-1B → `sapiens_1b/<n>.json`) or `python -m tools.openpose135 --image_dir <rgb_dir> --write_json <openpose_dir>` (OpenPose-135 → `<openpose_dir>/<n>_keypoints.json`). Both produce the 135-keypoint OpenPose layout `phd.inference.load_openpose_json` reads.
 3. **Run CameraHMR** — `release_code/emdb_test/get_hmr2init.py` calls CameraHMR per frame and writes `camerahmr/<n>.jpg_out.pkl` (with `global_orient`, `body_pose`, `pred_cam_t`).
 4. **Run SHAPify** — per subject, use `shapify/fit_shape.py` (with body measurements) or `shapify/fit_shape_wild.py` (without) on the first T-pose frame to produce `neutral_shape<P>.jpg.npy` (a 10-d β).
 5. **Pack into H5** — combine into one `emdb_eval.h5` with the structure above. Reference packer: `release_code/emdb_test/pack_emdb_res.py`.
@@ -270,23 +270,23 @@ The scripts in `release_code/emdb_test/` are the unfiltered preprocessing code f
 
 `tools/openpose135/` is a self-contained PyTorch port of CMU OpenPose's **BODY_25 + 2 hands + 70-pt face** stack, producing the same 135-keypoint layout Sapiens emits. Useful when you want to skip the `mmcv` / Sapiens install.
 
-The launcher `scripts/openpose135.py` mirrors the original `bin/openpose` CLI:
+The launcher (`python -m tools.openpose135`) mirrors the original `bin/openpose` CLI:
 
 ```bash
 # Folder of images → JSON + overlays
-python scripts/openpose135.py --image_dir rgb/ \
+python -m tools.openpose135 --image_dir rgb/ \
     --write_json keypoints/ --write_images overlays/
 
 # Video → per-frame JSON + composited overlay video
-python scripts/openpose135.py --video clip.mp4 \
+python -m tools.openpose135 --video clip.mp4 \
     --write_json keypoints/ --write_video overlay.mp4
 
 # Skip the hand+face nets (~3x faster on CPU)
-python scripts/openpose135.py --image_dir rgb/ --write_json kp/ \
+python -m tools.openpose135 --image_dir rgb/ --write_json kp/ \
     --no_hand --no_face
 
 # Use a local weights directory (skip HF auto-download)
-python scripts/openpose135.py --image foo.jpg --write_json kp/ \
+python -m tools.openpose135 --image foo.jpg --write_json kp/ \
     --weights_dir ~/openpose135_pth
 ```
 
