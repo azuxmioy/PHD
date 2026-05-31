@@ -11,7 +11,7 @@ Output is a new .npz with smoothed params, optionally with rendered
 per-frame overlays.
 
 Usage:
-    python fitting/evaluation/smooth_emdb_h5.py \\
+    python -m fitting.smooth_emdb \\
         --h5 /data/hohs2/datasets/emdb/emdb_eval.h5 \\
         --sequence P1_14_outdoor_climb \\
         --input_npz results/emdb_h5/P1_14_outdoor_climb_params.npz \\

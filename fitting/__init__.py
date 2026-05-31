@@ -1,1 +1,1 @@
-"""Body fitting entry points and shared optimization helpers."""
+"""Body fitting entry points and reusable optimization helpers."""

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Run fitting/evaluation/eval_emdb_h5.py over every sequence in the EMDB H5 bundle.
+# Run fitting/fit_emdb.py over every sequence in the EMDB H5 bundle.
 #
 # Usage:
-#   bash fitting/evaluation/eval_emdb_all.sh <config_yaml> [<h5_path> <output_dir>]
+#   bash scripts/eval_emdb_all.sh <config_yaml> [<h5_path> <output_dir>]
 #
 # Examples:
-#   bash fitting/evaluation/eval_emdb_all.sh fitting/config/eval/recommended.yaml
-#   bash fitting/evaluation/eval_emdb_all.sh fitting/config/eval/causal_smooth.yaml \
+#   bash scripts/eval_emdb_all.sh fitting/config/eval/recommended.yaml
+#   bash scripts/eval_emdb_all.sh fitting/config/eval/causal_smooth.yaml \
 #       /data/emdb_eval.h5 results/causal_smooth/
 #
 # After all sequences finish, compute_metrics_h5.py runs automatically and the
@@ -37,7 +37,7 @@ for seq in "${SEQUENCES[@]}"; do
         continue
     fi
     echo "=== $seq ==="
-    python fitting/evaluation/eval_emdb_h5.py \
+    python -m fitting.fit_emdb \
         --config "$CONFIG" \
         --h5 "$H5" --sequence "$seq" \
         --output_dir "$OUT" 2>&1 | tail -3

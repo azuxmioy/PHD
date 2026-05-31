@@ -20,11 +20,13 @@ phd/                    # python package
 shapify/                # standalone shape estimation
 fitting/                # body fitting scripts, demos, shared fitting code
 ├── config/eval/        # EMDB fitting/evaluation configs
-├── single_image/       # single-image / image-folder fitting
-├── video/              # in-the-wild video fitting and video generation
-├── emdb/               # EMDB fitting from on-disk frame layout
-├── evaluation/         # EMDB H5 benchmark and metrics
-└── shared/             # reusable fitting optimizers and smoothers
+├── evaluation/         # EMDB metric scripts
+├── helper/             # reusable fitting optimizers and utilities
+├── fit_image.py        # single-image / image-folder fitting
+├── fit_video.py        # in-the-wild video fitting
+├── fit_emdb.py         # EMDB H5 benchmark runner
+└── smooth_emdb.py      # post-fit temporal smoothing
+scripts/                # repo-level shell entry points
 assets/                 # mean_points.pkl + diffusion scheduler config
 demo_data/              # tiny single-image example
 checkpoints/            # PointDiT checkpoint (download separately)
@@ -90,7 +92,7 @@ You need three things that are **not** in this repo:
 ## Quick start: single-image fitting
 
 ```bash
-python fitting/single_image/fit_image.py \
+python -m fitting.fit_image \
     --test_data_dir demo_data/single \
     --exp_name demo_out \
     --pretrained_model_name_or_path checkpoints/pointdit \
@@ -167,7 +169,7 @@ You need:
 ### One sequence
 
 ```bash
-python fitting/evaluation/eval_emdb_h5.py \
+python -m fitting.fit_emdb \
     --config fitting/config/eval/recommended.yaml \
     --h5 /path/to/emdb_eval.h5 \
     --sequence P1_14_outdoor_climb \
@@ -181,7 +183,7 @@ Output: `results/recommended/P1_14_outdoor_climb_params.npz` containing
 
 ```bash
 EMDB_H5=/path/to/emdb_eval.h5 EMDB_CACHED=/path/to/cached.h5 \
-    bash fitting/evaluation/eval_emdb_all.sh fitting/config/eval/recommended.yaml
+    bash scripts/eval_emdb_all.sh fitting/config/eval/recommended.yaml
 # default output_dir: results/<config-basename>/
 ```
 
@@ -195,16 +197,15 @@ After all 17 finish, this calls `compare_metrics_h5.py` (or `compute_metrics_h5.
 | `causal_smooth.yaml` | recommended + one-way temporal smoothness | 61.93 | 0.18 |
 | `global_smooth.yaml` | smoother-style sequence losses inside batched fitting | demo-focused | 0.18 |
 | `per_frame.yaml` | B=1, prev_params chain (paper-style, slow) | (~55 on P1_14) | 4.2 |
-| `fast.yaml` | batched, n_iter=50 ablation | 63.91 | 0.18 |
 
-**`recommended.yaml` is the default config.** Reducing `lr_pose` 10× lets us refine the (already-good) CameraHMR init without drifting away from it. The old `v*.yaml` files are kept as legacy aliases for internal experiment tracing, but new scripts and docs use descriptive config names.
+**`recommended.yaml` is the default config.** Reducing `lr_pose` 10× lets us refine the (already-good) CameraHMR init without drifting away from it. Deprecated experiment aliases were removed; the public configs above are the supported entry points.
 
 ### Add temporal smoothing (V11c)
 
-Post-fit LBFGS smoother on top of any `eval_emdb_h5.py` output. Mostly for demo videos:
+Post-fit LBFGS smoother on top of any `fitting.fit_emdb` output. Mostly for demo videos:
 
 ```bash
-python fitting/evaluation/smooth_emdb_h5.py \
+python -m fitting.smooth_emdb \
     --h5 /path/to/emdb_eval.h5 \
     --sequence P1_14_outdoor_climb \
     --input_npz results/recommended/P1_14_outdoor_climb_params.npz \
@@ -217,7 +218,7 @@ Apply over all 17 with a one-liner:
 ```bash
 for f in results/recommended/*_params.npz; do
     seq=$(basename "$f" _params.npz)
-    python fitting/evaluation/smooth_emdb_h5.py --h5 $EMDB_H5 --sequence $seq \
+    python -m fitting.smooth_emdb --h5 $EMDB_H5 --sequence $seq \
         --input_npz "$f" --output_npz "results/recommended_smooth/${seq}_params.npz" --n_iter 10
 done
 ```
@@ -304,22 +305,22 @@ Weights auto-download from a Hugging Face mirror on first use (~400 MB total: `b
 
 ### Legacy from-disk evaluation
 
-`fitting/emdb/fit_emdb.py` is the pre-H5 pipeline that reads the per-frame on-disk layout (`rgb/`, `cropped_new/`, `bbox/`, `sapiens_1b/`, `camerahmr/`). Kept for backward compat; superseded by `fitting/evaluation/eval_emdb_h5.py` + the YAML configs.
+The old pre-H5 EMDB runner that read per-frame folders (`rgb/`, `cropped_new/`, `bbox/`, `sapiens_1b/`, `camerahmr/`) was removed from the refactored fitting package. Use `fitting.fit_emdb` with the packed H5 bundle instead.
 
 ```bash
-python fitting/emdb/fit_emdb.py \
-    --test_data_dir ./emdb \
-    --shape_dir ./guess_shape \
-    --subjects P1 P8 \
-    --pretrained_model_name_or_path checkpoints/pointdit
+python -m fitting.fit_emdb \
+    --config fitting/config/eval/recommended.yaml \
+    --h5 /path/to/emdb_eval.h5 \
+    --sequence P1_14_outdoor_climb \
+    --output_dir results/recommended/
 ```
 
 ## In-the-wild videos
 
-`fitting/video/fit_video.py` expects a prepared video folder with `rgb/`, `cropped_new/`, `bbox/`, `openpose/`, and `neutral_shape.npy` under `<root>/<subject>/<sequence>/`. It writes rendered overlays, meshes, and SMPL params to `<sequence>/<exp_name>/`.
+`fitting/fit_video.py` expects a prepared video folder with `rgb/`, `cropped_new/`, `bbox/`, `openpose/`, and `neutral_shape.npy` under `<root>/<subject>/<sequence>/`. It writes rendered overlays, meshes, and SMPL params to `<sequence>/<exp_name>/`.
 
 ```bash
-python fitting/video/fit_video.py \
+python -m fitting.fit_video \
     --test_data_dir ./video_data \
     --subjects data \
     --sequences v105 \
@@ -330,7 +331,7 @@ python fitting/video/fit_video.py \
 Create an mp4 from rendered overlays:
 
 ```bash
-python fitting/video/gen_vid.py \
+python -m fitting.helper.gen_vid \
     --image_dir ./video_data/data/v105/video_fit \
     --output ./video_data/data/v105/video_fit/fitter.mp4 \
     --fps 30

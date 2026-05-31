@@ -24,7 +24,7 @@ from phd.inference import (
 from phd.point_stats import load_point_statistics
 from phd.utils.geometry import rot6d_to_rotmat, aa_to_rotmat
 from phd.utils.renderer import Renderer
-from fitting.shared.fit_batch_wild import fit_batch
+from fitting.helper.fit_batch_wild import fit_batch
 
 from phd.surface_kp import SURFACE_KP
 from phd.paths import (
