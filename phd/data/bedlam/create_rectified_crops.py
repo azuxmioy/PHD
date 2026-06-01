@@ -281,8 +281,9 @@ def process_split(split: str, bedlam_root: Path, output_dir: Path):
             orient_aa = anno_dict['pose_world'][idx, :3]
             cam_orient_aa = anno_dict['pose_cam'][idx, :3]
 
-            pose_aa = anno_dict['pose_world'][idx, 3:]
-            betas = anno_dict['shape'][idx, :10]
+            pose_world = np.asarray(anno_dict['pose_world'][idx]).reshape(-1)
+            pose_aa = pose_world[3:72]
+            betas = np.asarray(anno_dict['shape'][idx]).reshape(-1)[:10]
             R = anno_dict['cam_ext'][idx][:3, :3]
             T = anno_dict['cam_ext'][idx][:3, 3:]
             K = anno_dict['cam_int'][idx]

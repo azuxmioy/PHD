@@ -53,6 +53,14 @@ Training still needs the external SMPL files and the ViTPose-H checkpoint
 described in the repo-level README, because the frozen ViTPose backbone is
 loaded during training.
 
+## MP4 Data Prep
+
+The official Hugging Face BEDLAM PNG chunks are large. For a lighter setup,
+download the official MP4 tar from Hugging Face and combine it with the SMPL
+annotation zip from the official BEDLAM project page. See
+`phd/data/bedlam/MP4_DATA_PREP.md` for the tested commands, debug overlays,
+raw-loader smoke test, and H5 build test.
+
 ## Optional: H5 Cache
 
 Use `dataset_h5` when you want a reusable preprocessed cache:

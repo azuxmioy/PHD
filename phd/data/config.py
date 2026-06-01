@@ -48,10 +48,10 @@ def parse_options():
         "--dataset_format",
         type=str,
         default="h5",
-        choices=["h5", "image"],
+        choices=["h5", "image", "bedlam_image"],
         help=(
             "Training dataset backend. 'h5' reads preprocessed BEDLAM H5 shards; "
-            "'image' reads raw BEDLAM image folders and anno_smpl npz files."
+            "'image'/'bedlam_image' reads raw BEDLAM image folders and anno_smpl npz files."
         ),
     )
     dataset_group.add_argument(
@@ -70,6 +70,20 @@ def parse_options():
             "Apply BEDLAM camera-rotation rectification before cropping. "
             "For dataset_format='image' this is computed online; for 'h5' it uses warp_crop/warp_kps/orient_rect."
         ),
+    )
+    dataset_group.add_argument(
+        "--data_splits",
+        nargs="*",
+        default=None,
+        help=(
+            "Optional BEDLAM train split names. If omitted, the default BEDLAM train split list is used."
+        ),
+    )
+    dataset_group.add_argument(
+        "--val_data_splits",
+        nargs="*",
+        default=None,
+        help="Optional BEDLAM validation split names. If omitted, the default BEDLAM validation split list is used.",
     )
     dataset_group.add_argument(
         "--test_data_dir",

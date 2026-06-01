@@ -37,6 +37,7 @@ BEDLAM_KEYS = (
     "cam_int",
     "gtkps",
 )
+SMPL_BODY_POSE_DIMS = 23 * 3
 
 
 def get_transform(center, scale, res, rot=0):
@@ -83,6 +84,14 @@ def create_gaussian(size, sigma_x, sigma_y):
     return gaussian / gaussian.sum()
 
 
+def _split_arg(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return list(value)
+
+
 class TrainDiffDatasetImage(Dataset):
     def __init__(self, args, val=False):
         self.val = val
@@ -94,9 +103,10 @@ class TrainDiffDatasetImage(Dataset):
         self.img_size = 256
         self.n_joints_kp = len(smpl_to_coco)
         self.dataset_path = Path(args.train_data_dir).expanduser()
+        self.image_dirs = {}
 
         self.annos = []
-        self.splits = BEDLAM_VAL_SPLITS if self.val else BEDLAM_TRAIN_SPLITS
+        self.splits = self._select_splits(args)
         self.data = []
         self._init_dataset()
 
@@ -123,6 +133,13 @@ class TrainDiffDatasetImage(Dataset):
         self.rest_V = self.body_model().vertices[0, SURFACE_KP].detach()
         self.n_points = self.rest_J.shape[0] + self.rest_V.shape[0]
 
+    def _select_splits(self, args):
+        split_value = getattr(args, "val_data_splits", None) if self.val else getattr(args, "data_splits", None)
+        configured_splits = _split_arg(split_value)
+        if configured_splits is not None:
+            return configured_splits
+        return BEDLAM_VAL_SPLITS if self.val else BEDLAM_TRAIN_SPLITS
+
     def _init_dataset(self):
         for split_id, split in enumerate(self.splits):
             anno_path = self.dataset_path / "anno_smpl" / f"{split}.npz"
@@ -131,6 +148,7 @@ class TrainDiffDatasetImage(Dataset):
                 raise FileNotFoundError(f"Missing BEDLAM annotation file: {anno_path}")
             if not image_dir.is_dir():
                 raise FileNotFoundError(f"Missing BEDLAM image directory: {image_dir}")
+            self.image_dirs[split] = image_dir
 
             with np.load(anno_path, allow_pickle=True) as anno_npz:
                 anno = {key: anno_npz[key] for key in BEDLAM_KEYS}
@@ -180,8 +198,8 @@ class TrainDiffDatasetImage(Dataset):
             )
 
             orient_cam = self._global_orient(anno["pose_cam"][image_id, :3], crop_rot, rect_R)
-            body_poses = torch.from_numpy(anno["pose_world"][image_id, 3:]).float()
-            cond_betas = torch.from_numpy(anno["shape"][image_id, :10]).float()
+            body_poses = self._body_pose(anno["pose_world"][image_id])
+            cond_betas = self._betas(anno["shape"][image_id])
 
             if not self.val:
                 cond_betas = cond_betas + torch.rand_like(cond_betas) * 0.5
@@ -222,13 +240,26 @@ class TrainDiffDatasetImage(Dataset):
     def _read_image(self, split, img_name):
         if isinstance(img_name, bytes):
             img_name = img_name.decode("utf-8")
-        image_path = self.dataset_path / "images_6fps" / split / "png" / str(img_name)
+        image_path = self.image_dirs[split] / str(img_name)
         image_bgr = cv2.imread(str(image_path))
         if image_bgr is None:
             raise FileNotFoundError(f"Could not read BEDLAM image: {image_path}")
         if "closeup" in split:
             image_bgr = cv2.rotate(image_bgr, cv2.ROTATE_90_CLOCKWISE)
         return image_bgr
+
+    def _body_pose(self, pose_world):
+        pose_world = np.asarray(pose_world, dtype=np.float32).reshape(-1)
+        body_pose = pose_world[3:3 + SMPL_BODY_POSE_DIMS]
+        if body_pose.shape[0] != SMPL_BODY_POSE_DIMS:
+            raise ValueError(f"Expected {SMPL_BODY_POSE_DIMS} SMPL body pose values, got {body_pose.shape[0]}")
+        return torch.from_numpy(body_pose).float()
+
+    def _betas(self, betas):
+        betas = np.asarray(betas, dtype=np.float32).reshape(-1)
+        if betas.shape[0] < 10:
+            raise ValueError(f"Expected at least 10 shape betas, got {betas.shape[0]}")
+        return torch.from_numpy(betas[:10]).float()
 
     def _crop_image_and_keypoints(self, image_bgr, kp2d, center, scale, rot):
         trans = get_transform(center, scale, (self.img_size, self.img_size), rot=rot).astype(np.float32)

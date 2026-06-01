@@ -24,6 +24,7 @@ dist/
 *.pdf
 *.mp4
 *.h5
+*.zip
 checkpoints/
 !checkpoints/.gitkeep
 outputs/
