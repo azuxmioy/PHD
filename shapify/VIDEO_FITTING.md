@@ -108,7 +108,7 @@ composing PointDiT's noisy per-frame rotations.
    one by default = first frame in input order) gives:
    - `R_body→cam₀` — pelvis-to-camera rotation
    - `T_body_in_cam₀` — pelvis position in cam_0 frame (via
-     `phd.camera.find_cam_pos` — a weighted linear-LS solve from frame-0
+     `phd.utils.geometry.find_cam_pos` — a weighted linear-LS solve from frame-0
      OpenPose + PointDiT's 3D joints)
    - `θ_init` (body_pose) — used as the shared body_pose init **and** to
      build the 3D anchors for PnP (consistent pair)

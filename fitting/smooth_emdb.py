@@ -30,8 +30,8 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 
-from phd.keypoints import SMPL_TO_OPENPOSE
-from phd.paths import smpl_model_path
+from phd.utils.assets import smpl_model_path
+from phd.utils.keypoints import SMPL_TO_OPENPOSE
 from phd.utils.geometry import (
     rotation_matrix_to_angle_axis,
     perspective_projection,

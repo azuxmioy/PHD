@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from phd.inference import find_image_path, load_openpose_json
+from phd.utils.image import find_image_path, load_openpose_json
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 

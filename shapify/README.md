@@ -12,7 +12,7 @@ This package is scoped to personal shape fitting:
 ## Single image (T-pose, paper setup)
 
 ```bash
-python -m shapify.fit_shape --config shapify/configs/measured.yaml --subjects subjects.json --input_dir input/
+bash scripts/run_shapify.sh shapify/configs/measured.yaml subjects.json input/ fit_shape_final
 ```
 
 `subjects.json` is a list of `{image, pose, height, weight, gender}` entries.

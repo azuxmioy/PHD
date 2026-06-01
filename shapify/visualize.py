@@ -43,7 +43,7 @@ def main(args):
     viewer_size = None
 
     viewer = Viewer(size=viewer_size)
-    from phd.paths import smpl_model_path
+    from phd.utils.assets import smpl_model_path
     J_regressor_24_SMPL_neutral = SMPL(model_path=smpl_model_path(),
                                         gender='neutral').J_regressor.cpu().numpy()
     

@@ -38,7 +38,7 @@ import numpy as np
 import torch
 import trimesh
 
-from phd.keypoints import SMPL_TO_OPENPOSE
+from phd.utils.keypoints import SMPL_TO_OPENPOSE
 
 from phd.utils.geometry import perspective_projection
 
@@ -383,8 +383,9 @@ def run(config: dict) -> None:
     from accelerate.utils import set_seed
     from fitting.helper.image_inputs import load_image_fit_input
     from fitting.helper.init_params import initialize_from_pointdit
-    from phd.inference import IMAGE_TRANSFORM, create_pointdit_pipeline, create_smpl_fitter
-    from phd.paths import smpl_model_path, smplfitter_data_root
+    from phd.utils.assets import smpl_model_path, smplfitter_data_root
+    from phd.utils.image import IMAGE_TRANSFORM
+    from phd.utils.modeling import create_pointdit_pipeline, create_smpl_fitter
 
     if config.get("seed") is not None:
         set_seed(int(config["seed"]))

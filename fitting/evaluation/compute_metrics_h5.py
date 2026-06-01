@@ -24,7 +24,7 @@ import numpy as np
 import smplx
 import torch
 
-from phd.paths import smpl_model_path
+from phd.utils.assets import smpl_model_path
 
 
 def compute_similarity_transform(S1, S2):

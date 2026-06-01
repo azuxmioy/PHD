@@ -7,8 +7,8 @@ from dataclasses import dataclass
 import torch
 import smplx
 
-from phd.keypoints import SMPL_TO_OPENPOSE
-from phd.paths import smpl_model_path
+from phd.utils.assets import smpl_model_path
+from phd.utils.keypoints import SMPL_TO_OPENPOSE
 
 DEFAULT_FOCAL = 1436.0
 DEFAULT_IMAGE_WIDTH = 1440

@@ -18,10 +18,10 @@ from phd.data.splits import (
     BEDLAM_TRAIN_SPLITS,
     BEDLAM_VAL_SPLITS,
 )
-from phd.keypoints import SMPL_TO_COCO17 as smpl_to_coco
-from phd.point_stats import load_point_statistics
-from phd.surface_kp import SURFACE_KP
+from phd.utils.assets import load_point_statistics, smpl_model_path
 from phd.utils.geometry import aa_to_rotmat, matrix_to_rotation_6d
+from phd.utils.keypoints import SMPL_TO_COCO17 as smpl_to_coco
+from phd.utils.surface import SURFACE_KP
 
 
 IMAGE_MEAN= [0.485, 0.456, 0.406]
@@ -80,7 +80,6 @@ class TrainDiffDatasetH5(Dataset):
 
         self.k_size = 11
         self.gaussian_kernals = torch.stack([create_gaussian(size=self.k_size, sigma_x=2, sigma_y=2)] * self.n_joints_kp).unsqueeze(1)
-        from phd.paths import smpl_model_path
         self.body_model = smplx.SMPL(model_path=smpl_model_path(), gender='neutral')
 
         self.rest_J = self.body_model().joints[0].detach()

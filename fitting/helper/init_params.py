@@ -7,11 +7,10 @@ from typing import Optional
 import torch
 import trimesh
 
-from phd.camera import find_cam_pos
-from phd.keypoints import SMPL_TO_OPENPOSE
-from phd.point_stats import load_point_statistics
-from phd.surface_kp import SURFACE_KP
-from phd.utils.geometry import aa_to_rotmat, rot6d_to_rotmat
+from phd.utils.assets import load_point_statistics
+from phd.utils.geometry import aa_to_rotmat, find_cam_pos, rot6d_to_rotmat
+from phd.utils.keypoints import SMPL_TO_OPENPOSE
+from phd.utils.surface import SURFACE_KP
 
 mean_points, std_points = load_point_statistics()
 

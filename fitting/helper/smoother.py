@@ -17,10 +17,10 @@ import pickle
 import torch
 from tqdm import tqdm
 import smplx
-from phd.keypoints import SMPL_TO_OPENPOSE
-from phd.utils.renderer import Renderer
+from phd.utils.assets import smpl_model_path
 from phd.utils.geometry import rotation_matrix_to_angle_axis, perspective_projection
-from phd.paths import smpl_model_path
+from phd.utils.keypoints import SMPL_TO_OPENPOSE
+from phd.utils.renderer import Renderer
 W_REG = 5
 W_SMOOTH = 20
 W_KP2D = 5

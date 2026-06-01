@@ -31,19 +31,16 @@ import smplx
 from tqdm import tqdm
 from accelerate.utils import set_seed
 
-from phd.inference import (
-    IMAGE_TRANSFORM,
-    SMPL_TO_OPENPOSE,
-    create_backbone,
-    find_cam_pos,
-    jpeg_to_pil,
-)
+from phd.utils.geometry import find_cam_pos
+from phd.utils.image import IMAGE_TRANSFORM, jpeg_to_pil
+from phd.utils.keypoints import SMPL_TO_OPENPOSE
+from phd.utils.modeling import create_backbone
 from phd.models.pose_dit import PoseDiTTransformer2DModel
 from phd.models.pipeline import PoseDiTPipeline
 from phd.fitter.pt.fitter import SMPLFitter
 from phd.fitter.pt.bodymodel import SMPLBodyModel
-from phd.surface_kp import SURFACE_KP
-from phd.paths import (
+from phd.utils.surface import SURFACE_KP
+from phd.utils.assets import (
     SCHEDULER_FLOW_YAML,
     smpl_model_path,
     smplfitter_data_root,

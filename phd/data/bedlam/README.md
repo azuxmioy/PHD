@@ -34,7 +34,7 @@ Then start training:
 
 ```bash
 accelerate config
-bash phd/train.sh
+bash scripts/train_pointdit.sh
 ```
 
 `phd.data.dataset_image.TrainDiffDatasetImage` reads each split's `.npz`,

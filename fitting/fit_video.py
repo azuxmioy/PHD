@@ -13,20 +13,13 @@ from PIL import Image
 
 from accelerate.utils import set_seed
 
-from phd.inference import (
-    IMAGE_TRANSFORM,
-    create_pointdit_pipeline,
-    create_smpl_fitter,
-    load_openpose_json,
-)
+from phd.utils.image import IMAGE_TRANSFORM, load_openpose_json
+from phd.utils.modeling import create_pointdit_pipeline, create_smpl_fitter
 from fitting.helper.fit_batch import add_fit_batch_args, apply_yaml_defaults, fit_batch
 from fitting.helper.init_params import initialize_from_pointdit
 from fitting.helper.visualization import add_render_args, create_renderer, render_overlay
 
-from phd.paths import (
-    smpl_model_path,
-    smplfitter_data_root,
-)
+from phd.utils.assets import smpl_model_path, smplfitter_data_root
 
 os.environ.setdefault('DATA_ROOT', smplfitter_data_root())
 

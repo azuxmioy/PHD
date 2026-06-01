@@ -89,6 +89,14 @@ You need three things that are **not** in this repo:
 | `CUDA_VISIBLE_DEVICES` | unset | Standard PyTorch GPU selection. The demo uses ~3 GB of VRAM. |
 | `PYOPENGL_PLATFORM` | unset | Set to `egl` on headless servers without a display for `pyrender`. |
 
+## Shell Launchers
+
+All bash examples live in `scripts/`:
+
+- `scripts/train_pointdit.sh` — train the cleaned `phd` PointDiT package.
+- `scripts/run_shapify.sh` — run SHAPify single-image shape fitting.
+- `scripts/eval_emdb_all.sh` — run all EMDB fitting/evaluation sequences.
+
 ## Quick start: single-image fitting
 
 ```bash
@@ -137,11 +145,11 @@ uses a T-pose image plus per-subject body height and weight.
 
 ```bash
 SMPL_MODEL_PATH=body_models/smpl \
-python -m shapify.fit_shape \
-    --config shapify/configs/measured.yaml \
-    --subjects demo_data/subjects_example.json \
-    --input_dir my_subjects/ \
-    --output_dir guess_shape/
+bash scripts/run_shapify.sh \
+    shapify/configs/measured.yaml \
+    demo_data/subjects_example.json \
+    my_subjects/ \
+    guess_shape/
 ```
 
 `subjects.json` is a list of `{image, pose, height, weight, gender}` entries (see [demo_data/subjects_example.json](demo_data/subjects_example.json)). Image and OpenPose JSON paths are resolved relative to `--input_dir`. Output is `neutral_shape<image>.npy` — a 10-dim β vector per subject. Feed this β into the body fitter via the per-image `params/*.pkl`.
@@ -273,7 +281,7 @@ You need raw EMDB plus three external models:
 Pipeline:
 
 1. **Extract person crops + bbox** — `release_code/emdb_test/extract_bbox.py` reads EMDB's per-frame metadata, generates 256×256 crops, writes `bbox/<n>.json` per frame.
-2. **Run 2D keypoints** — either `release_code/emdb_test/get_2dkp.py` (Sapiens-1B → `sapiens_1b/<n>.json`) or `python -m tools.openpose135 --image_dir <rgb_dir> --write_json <openpose_dir>` (OpenPose-135 → `<openpose_dir>/<n>_keypoints.json`). Both produce the 135-keypoint OpenPose layout `phd.inference.load_openpose_json` reads.
+2. **Run 2D keypoints** — either `release_code/emdb_test/get_2dkp.py` (Sapiens-1B → `sapiens_1b/<n>.json`) or `python -m tools.openpose135 --image_dir <rgb_dir> --write_json <openpose_dir>` (OpenPose-135 → `<openpose_dir>/<n>_keypoints.json`). Both produce the 135-keypoint OpenPose layout `phd.utils.image.load_openpose_json` reads.
 3. **Run CameraHMR** — `release_code/emdb_test/get_hmr2init.py` calls CameraHMR per frame and writes `camerahmr/<n>.jpg_out.pkl` (with `global_orient`, `body_pose`, `pred_cam_t`).
 4. **Run SHAPify** — per subject, use `python -m shapify.fit_shape --config shapify/configs/measured.yaml` with body measurements on the first T-pose frame to produce `neutral_shape<P>.jpg.npy` (a 10-d β).
 5. **Pack into H5** — combine into one `emdb_eval.h5` with the structure above. Reference packer: `release_code/emdb_test/pack_emdb_res.py`.
@@ -361,7 +369,7 @@ Edit `phd/config/train.yaml` to point `dataset.train_data_dir` at your BEDLAM ro
 
 ```bash
 accelerate config             # one-time
-bash phd/train.sh             # or: accelerate launch phd/train.py --config phd/config/train.yaml
+bash scripts/train_pointdit.sh  # or: accelerate launch phd/train.py --config phd/config/train.yaml
 ```
 
 The paper uses a two-stage curriculum:

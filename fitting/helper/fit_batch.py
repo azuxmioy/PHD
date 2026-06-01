@@ -3,10 +3,10 @@ from __future__ import annotations
 import torch
 from tqdm import tqdm
 
-from phd.keypoints import COCO25_HANDS_IDX, SMPL_TO_COCO17, SMPL_TO_OPENPOSE, SMPL_TO_OPENPOSE_HANDS
-from phd.point_stats import load_point_statistics
-from phd.surface_kp import SURFACE_KP
+from phd.utils.assets import load_point_statistics
 from phd.utils.geometry import aa_to_rotmat, matrix_to_rotation_6d, perspective_projection, rot6d_to_rotmat
+from phd.utils.keypoints import COCO25_HANDS_IDX, SMPL_TO_COCO17, SMPL_TO_OPENPOSE, SMPL_TO_OPENPOSE_HANDS
+from phd.utils.surface import SURFACE_KP
 
 mean_points, std_points = load_point_statistics()
 

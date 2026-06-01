@@ -1,13 +1,11 @@
 from importlib import import_module
 
-from . import geometry
-
-__all__ = ["geometry", "kps", "Renderer"]
+__all__ = ["assets", "geometry", "image", "keypoints", "kps", "modeling", "surface", "Renderer"]
 
 
 def __getattr__(name):
-    if name == "kps":
-        return import_module(f"{__name__}.kps")
+    if name in {"assets", "geometry", "image", "keypoints", "kps", "modeling", "surface"}:
+        return import_module(f"{__name__}.{name}")
     if name == "Renderer":
         from .renderer import Renderer
 

@@ -1,6 +1,6 @@
 """OpenPose135Detector — fuses BODY_25 + 2 hands + 70-pt face per person.
 
-Output layout matches CMU OpenPose JSON (consumed by phd/inference.py:load_openpose_json):
+Output layout matches CMU OpenPose JSON (consumed by phd.utils.image.load_openpose_json):
 - pose_keypoints_2d:        25 triplets
 - hand_left_keypoints_2d:   21 triplets
 - hand_right_keypoints_2d:  21 triplets
@@ -185,5 +185,5 @@ def _face_roi_for_person(person, candidate, W, H):
 
 
 def write_openpose_json(path: str | Path, people: list[dict]) -> None:
-    """Write people in CMU OpenPose JSON format (compatible with phd/inference.py)."""
+    """Write people in CMU OpenPose JSON format (compatible with phd.utils.image)."""
     Path(path).write_text(json.dumps({"version": 1.3, "people": people}))

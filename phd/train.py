@@ -8,9 +8,7 @@ import copy
 import shutil
 import smplx
 import numpy as np
-from PIL import Image
 import torch
-import torch.nn.functional as F
 import torch.utils.checkpoint
 from diffusers.training_utils import free_memory, compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
 
@@ -36,19 +34,16 @@ import transformers
 from phd.data.dataset import TrainDiffDataset
 from phd.data.test_dataset import TestDiffDataset
 from phd.data.config import parse_options, argparse_to_str
-from phd.inference import create_backbone
-from phd.point_stats import load_point_statistics
-from phd.surface_kp import SURFACE_KP
+from phd.utils.assets import SCHEDULER_FLOW_YAML, load_point_statistics, smpl_model_path, smplfitter_data_root
 from phd.models.pose_dit import PoseDiTTransformer2DModel
 from phd.models.pipeline import PoseDiTPipeline
 from phd.utils.geometry import rot6d_to_rotmat
+from phd.utils.modeling import create_backbone
 from phd.utils.renderer import Renderer
+from phd.utils.surface import SURFACE_KP
+from phd.utils.visualization import heatmap_to_vis, image_grid, tensor_to_np
 from phd.fitter.pt.fitter import SMPLFitter
 from phd.fitter.pt.bodymodel import SMPLBodyModel
-from phd.paths import (
-    smpl_model_path,
-    smplfitter_data_root,
-)
 
 os.environ.setdefault('DATA_ROOT', smplfitter_data_root())
 mean_points, std_points = load_point_statistics()
@@ -56,35 +51,6 @@ mean_points, std_points = load_point_statistics()
 check_min_version("0.24.0")
 
 logger = get_logger(__name__)
-
-def tensor_to_np(image):
-    # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
-    image = image.cpu().permute(0, 2, 3, 1).float().numpy()
-    return image
-
-
-def image_grid(imgs, rows, cols):
-    assert len(imgs) == rows * cols
-
-    w, h, _ = imgs[0].shape
-    grid = Image.new("RGB", size=(cols * w, rows * h))
-
-    for i, img in enumerate(imgs):
-        pil_img = Image.fromarray((img * 255).astype(np.uint8))
-        grid.paste(pil_img, box=(i % cols * w, i // cols * h))
-
-    return grid
-
-def heatmap_to_vis (heatmap):
-
-    if heatmap is None:
-        return np.zeros((1, 256, 256, 3))
-    # (B, 17, H, W) -> (B, H, W, 3)
-    heatmap = heatmap[:1]
-    vismap = torch.amax(heatmap / (torch.amax(heatmap, dim=[-1, -2], keepdim=True) + 1e-8), dim=1, keepdim=True)
-    vismap = F.interpolate(vismap, size=(256, 256), mode='bilinear', align_corners=False).repeat(1, 3, 1, 1).permute(0, 2, 3, 1).detach().cpu().numpy()
-
-    return vismap
 
 def log_validation(logger, val_dataloader, backbone, head, dit, scheduler,
                             args, accelerator, weight_dtype, step, body_model,
@@ -335,7 +301,6 @@ def main(args, args_str):
     fitter_model = SMPLBodyModel('smpl', 'neutral')  # create the body model to be fitted
     fitter = SMPLFitter(fitter_model, num_betas=10, vertex_subset=SURFACE_KP)  # create the fitter
 
-    from phd.paths import SCHEDULER_FLOW_YAML
     noise_scheduler = FlowMatchEulerDiscreteScheduler.from_config(str(SCHEDULER_FLOW_YAML))
     noise_scheduler_copy = copy.deepcopy(noise_scheduler)
 
