@@ -18,6 +18,7 @@ from fitting.helper.fit_batch import add_fit_batch_args, apply_yaml_defaults, fi
 from fitting.helper.image_inputs import (
     add_image_input_args,
     create_openpose_detector,
+    find_keypoints_path,
     is_prepared_image_folder,
     list_input_images,
     load_image_fit_input,
@@ -52,8 +53,9 @@ def main(args):
 
     folder_path = Path(args.test_data_dir)
     prepared = is_prepared_image_folder(folder_path)
-    detector = None if prepared else create_openpose_detector(args)
     image_list = list_input_images(folder_path, prepared=prepared)
+    has_all_keypoints = all(find_keypoints_path(path, args) is not None for path in image_list)
+    detector = None if prepared or has_all_keypoints else create_openpose_detector(args)
     if args.output_path:
         save_root = Path(args.output_path)
     else:
@@ -138,6 +140,7 @@ def main(args):
                         'global_orient': out_params['global_orient'].cpu().numpy(),
                         'betas': out_params['betas'].cpu().numpy(),
                         'camera': out_params['camera'].cpu().numpy(),
+                        'K': sample.K,
                         }
             pickle.dump(out_dict, f)
 

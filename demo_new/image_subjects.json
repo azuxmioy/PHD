@@ -1,0 +1,18 @@
+[
+    {
+        "id": "demo_image",
+        "image": "1.jpg",
+        "pose": "1_keypoints.json",
+        "camera": {
+            "focal": [
+                1423.4002685546875,
+                1423.4002685546875
+            ],
+            "width": 1440,
+            "height": 1920
+        },
+        "height": 1.64,
+        "weight": 55,
+        "gender": "female"
+    }
+]

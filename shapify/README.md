@@ -14,8 +14,8 @@ reused by PointDiT inference and the body-fitting scripts.
 
 ## Single-Image Shape Fitting
 
-The paper setup uses one T-pose image, an OpenPose-format keypoint JSON, and
-height/weight measurements.
+The paper setup uses one T-pose image, an OpenPose-format keypoint JSON,
+per-image focal length, and height/weight measurements.
 
 ```bash
 bash scripts/run_shapify.sh \
@@ -32,6 +32,7 @@ The subject JSON is a list of entries:
   {
     "image": "subject0.jpg",
     "pose": "subject0_keypoints.json",
+    "focal": 1436.0,
     "height": 1.77,
     "weight": 60,
     "gender": "male"
@@ -39,7 +40,11 @@ The subject JSON is a list of entries:
 ]
 ```
 
-`image` and `pose` are resolved relative to `--input_dir`. The script writes
+`image` and `pose` are resolved relative to `--input_dir`. `height` and
+`weight` are the person measurements. `focal` is required per subject; image
+dimensions are inferred from the image unless you set `image_width` and
+`image_height`, or group intrinsics as
+`"camera": {"focal": 1436.0, "width": 1440, "height": 1920}`. The script writes
 `neutral_shape<image>.npy`, `pred_shape<image>.obj`, `opt_mesh_<image>.obj`,
 and an overlay image to `--output_dir`.
 
@@ -64,6 +69,7 @@ The video subject JSON accepts either explicit frames or a subject directory:
   {
     "id": "subject0",
     "subject_dir": "subject0",
+    "focal": 1436.0,
     "height": 1.77,
     "weight": 60,
     "gender": "male"
@@ -74,8 +80,14 @@ The video subject JSON accepts either explicit frames or a subject directory:
 When `subject_dir` is used, two layouts are supported:
 
 - Prepared: `rgb/`, `cropped_new/`, `bbox/`, and `openpose/` subdirectories.
+- Minimal: `rgb/` frames plus `openpose/` keypoints. Crops and bboxes are built
+  in memory.
 - Raw: image files directly under the subject directory; the bundled
   OpenPose-135 detector creates keypoints, bbox, and crops in memory.
+
+For minimal/raw video inputs, bbox creation follows the demo preprocessing:
+BODY_25 keypoints above `openpose.bbox_keypoint_thresh` are enclosed and
+expanded by `openpose.bbox_scale` before the 256x256 crop is generated.
 
 Outputs per subject include `neutral_shape<id>.npy`, `pred_shape<id>.obj`,
 `opt_mesh_<id>.obj`, `body_pose_rotmat<id>.npy`, camera trajectory files, and
@@ -90,8 +102,8 @@ The multi-view formulation is described in [VIDEO_FITTING.md](VIDEO_FITTING.md).
 | `--subjects` | both | Subject metadata JSON. |
 | `--input_dir` | both | Root for images, keypoints, or subject video folders. |
 | `--output_dir` | both | Directory for beta vectors, meshes, and overlays. |
-| `--height`, `--weight` in JSON | both | Measurement anchors for metric scale and body mass. |
-| `--focal` | `fit_shape.py` | Camera focal length in pixels. |
+| `focal` in JSON | both | Required focal length paired with each subject/image. |
+| `height`, `weight` in JSON | both | Measurement anchors for metric scale and body mass. |
 | `--n_frames` | `fit_shape_video.py` | Number of frames sampled per subject. |
 | `--pretrained_model_name_or_path` | `fit_shape_video.py` | PointDiT checkpoint used for frame initialization. |
 | `--openpose_weights_dir` in config | `fit_shape_video.py` | Local OpenPose-135 weight directory, if auto-download is not desired. |
@@ -120,8 +132,8 @@ bash scripts/run_fitting.sh image \
     demo_outputs/shapify/neutral_shape<subject>.npy
 ```
 
-For video fitting, provide the beta file as `neutral_shape.npy` inside each
-prepared `<video_root>/<subject>/<sequence>/` folder.
+For video fitting, pass the beta file with `--betas_path`, or place it as
+`neutral_shape.npy` inside each video folder.
 
 PointDiT training/inference code lives in `phd/`; body fitting and EMDB
 evaluation live in `fitting/`.

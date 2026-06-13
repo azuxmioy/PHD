@@ -6,7 +6,7 @@ This repository contains three main components:
 
 - **SHAPify**: recovers a personalized SMPL body shape vector from a T-pose image or a static-subject video.
 - **PointDiT**: samples shape-conditioned 3D body points from a person image.
-- **Body fitting**: fits SMPL pose, camera, and mesh outputs for images, prepared videos, and EMDB evaluation.
+- **Body fitting**: fits SMPL pose, camera, and mesh outputs for images, videos, and EMDB evaluation.
 
 ## Install
 
@@ -90,35 +90,48 @@ bash scripts/run_pointdit_inference.sh \
     --random_shape_betas
 ```
 
-### 3. Fit Images or Prepared Videos
+### 3. Fit Images or Videos
 
-Fit a raw image, image folder, or prepared image folder using the SHAPify shape:
+Fit a raw image or image folder using the SHAPify shape. Camera metadata is
+paired with the image through a sidecar file, folder `metadata.json`, or
+`--metadata_file`/`--metadata_dir`.
 
 ```bash
 bash scripts/run_fitting.sh image \
-    demo_data/single \
+    path/to/image_or_folder \
     demo_outputs/fitting \
-    demo_outputs/shapify/neutral_shapesubject10.jpg.npy
+    demo_outputs/shapify/neutral_shape<subject>.npy \
+    checkpoints/pointdit \
+    --metadata_file path/to/camera_metadata.json
 ```
 
-Fit a prepared video folder that already contains `neutral_shape.npy`:
+Fit a video folder with `rgb/` frames, optional `openpose/` keypoints, and
+camera `metadata.json`. If no beta file is provided, the video demo runs
+SHAPify on the first frame using a subject-measurements JSON:
 
 ```bash
-bash scripts/run_fitting.sh video data/video_prepared video_fit checkpoints/pointdit
+bash scripts/run_fitting.sh video \
+    path/to/video_folder \
+    video_fit \
+    checkpoints/pointdit \
+    --shape_subjects path/to/video_subjects.json
 ```
 
 ## Important Arguments
 
 | Launcher | Argument | What to change |
 |---|---|---|
-| `scripts/run_shapify.sh` | positional 2: `subjects_json` | Subject list with image, keypoint JSON, height, weight, and gender. |
+| `scripts/run_shapify.sh` | positional 2: `subjects_json` | Subject list with image, keypoint JSON, focal, height, weight, and gender. |
 | `scripts/run_shapify.sh` | positional 3/4: `input_dir`, `output_dir` | Input image/keypoint root and output directory for beta vectors. |
 | `scripts/run_pointdit_inference.sh` | positional 1: `test_data_dir` | Prepared crop folder for PointDiT inference. |
 | `scripts/run_pointdit_inference.sh` | `--betas_path` | Use a specific 10-D shape vector, usually from SHAPify. |
 | `scripts/run_pointdit_inference.sh` | `--random_shape_betas` | Sample one random shape per generated hypothesis. |
 | `scripts/run_fitting.sh image` | positional 2: `input_path` | Raw image, raw image folder, or prepared image folder. |
 | `scripts/run_fitting.sh image` | positional 4: `betas_path` | Shape vector from SHAPify; pass `-` to use zero betas. |
-| `scripts/run_fitting.sh video` | positional 2: `video_root` | Prepared root with subject/sequence folders. |
+| `scripts/run_fitting.sh video` | positional 2: `video_root` | Direct video folder with `rgb/`, or a root with subject/sequence folders. |
+| `scripts/run_fitting.sh video` | `--betas_path`, `--shape_subjects` | Use an existing shape, or run first-frame SHAPify from subject measurements. |
+| `scripts/run_fitting.sh` | `--metadata_file`, `--metadata_dir` | Camera metadata containing `focal` or `K`; use per image/video, not as a global launch setting. |
+| `scripts/run_fitting.sh` | `--keypoints_dir` | Optional OpenPose JSON directory when keypoints are not next to the images. |
 | all launchers | final extra args | Passed through to the underlying Python CLI. Use `--help` on the Python module for the full list. |
 
 ## Detailed Docs
@@ -126,6 +139,7 @@ bash scripts/run_fitting.sh video data/video_prepared video_fit checkpoints/poin
 - [SHAPify usage](shapify/README.md)
 - [PointDiT inference and training](phd/README.md)
 - [Image/video fitting and EMDB benchmarking](fitting/README.md)
+- [Minimal demo data layout](demo_new/README.md)
 - [BEDLAM data preparation](phd/data/bedlam/README.md)
 
 ## Citation

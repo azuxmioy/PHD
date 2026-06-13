@@ -1,0 +1,19 @@
+[
+    {
+        "id": "video",
+        "subject_dir": "video",
+        "image": "video/rgb/0.jpg",
+        "pose": "video/openpose/0_keypoints.json",
+        "camera": {
+            "focal": [
+                1425.2933349609375,
+                1425.2933349609375
+            ],
+            "width": 1440,
+            "height": 1920
+        },
+        "height": 1.77,
+        "weight": 60,
+        "gender": "male"
+    }
+]

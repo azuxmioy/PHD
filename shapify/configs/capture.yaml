@@ -2,10 +2,8 @@ subjects:
 input_dir: input_capture
 output_dir: fit_shape_capture
 
-camera:
-  width: 1440
-  height: 1920
-  focal: 1436.4
+# Camera focal length is required per subject in the subjects JSON. Optional
+# per-subject width/height override the image dimensions when needed.
 
 template:
   pose_type: T

@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 import smplx
+from PIL import Image
 
 from phd.utils.assets import smpl_model_path
 from phd.utils.keypoints import SMPL_TO_OPENPOSE
 
-DEFAULT_FOCAL = 1436.0
 DEFAULT_IMAGE_WIDTH = 1440
 DEFAULT_IMAGE_HEIGHT = 1920
 
@@ -71,6 +72,61 @@ def create_body_model(device: torch.device | None = None):
     if device is None:
         device = default_device()
     return smplx.SMPL(model_path=smpl_model_path(), gender="neutral").to(device)
+
+
+def focal_pair(focal):
+    if isinstance(focal, (list, tuple)):
+        return tuple(focal)
+    return focal, focal
+
+
+def _subject_camera_fields(subject: dict) -> dict:
+    camera = dict(subject.get("camera") or {})
+    if "width" in subject and "image_width" not in subject:
+        camera["width"] = subject["width"]
+    if "image_width" in subject:
+        camera["width"] = subject["image_width"]
+    if "image_height" in subject:
+        camera["height"] = subject["image_height"]
+    if "focal" in subject:
+        camera["focal"] = subject["focal"]
+    if "focal_length" in subject and "focal" not in camera:
+        camera["focal"] = subject["focal_length"]
+    if "focal_length" in camera and "focal" not in camera:
+        camera["focal"] = camera["focal_length"]
+    return camera
+
+
+def subject_focal(subject: dict, *, label: str = "subject"):
+    camera = _subject_camera_fields(subject)
+    focal = camera.get("focal")
+    if focal is None:
+        raise ValueError(
+            f"{label} is missing camera focal length. Add 'focal' to the subject "
+            "entry, or use {'camera': {'focal': ...}} for that subject."
+        )
+    return focal
+
+
+def subject_camera(subject: dict, image_path: str | Path, defaults: dict | None = None, *, label: str = "subject") -> dict:
+    defaults = dict(defaults or {})
+    if defaults.get("focal") is not None:
+        raise ValueError(
+            "Global camera.focal is no longer supported. Move the focal length "
+            "into each subject entry as 'focal' or 'camera.focal'."
+        )
+
+    camera = {k: v for k, v in defaults.items() if k in {"width", "height"} and v is not None}
+    camera.update(_subject_camera_fields(subject))
+    camera["focal"] = subject_focal(subject, label=label)
+
+    if "width" not in camera or "height" not in camera:
+        with Image.open(image_path) as image:
+            width, height = image.size
+        camera.setdefault("width", width)
+        camera.setdefault("height", height)
+
+    return camera
 
 
 def joint_weights(device: torch.device | None = None) -> torch.Tensor:

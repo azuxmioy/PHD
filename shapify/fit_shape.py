@@ -15,13 +15,14 @@ import trimesh
 from phd.utils.geometry import perspective_projection
 
 from .config import (
-    DEFAULT_FOCAL,
     DEFAULT_IMAGE_HEIGHT,
     DEFAULT_IMAGE_WIDTH,
     ShapeFitConfig,
     create_body_model,
     default_device,
+    focal_pair,
     prior_betas,
+    subject_camera,
 )
 from .fitter import draw_points_on_image
 from .fitter import fit_betas as _fit_betas
@@ -32,11 +33,7 @@ DEFAULT_RUN_CONFIG = {
     "subjects": None,
     "input_dir": "input",
     "output_dir": "fit_shape_final",
-    "camera": {
-        "width": DEFAULT_IMAGE_WIDTH,
-        "height": DEFAULT_IMAGE_HEIGHT,
-        "focal": DEFAULT_FOCAL,
-    },
+    "camera": {},
     "template": {
         "pose_type": "T",
         "leg_close": False,
@@ -53,13 +50,6 @@ DEFAULT_RUN_CONFIG = {
 
 def _optimizer_config(config: dict) -> ShapeFitConfig:
     return ShapeFitConfig(**merge_dict(asdict(ShapeFitConfig()), config.get("optimizer", {})))
-
-
-def _focal_pair(camera: dict):
-    focal = camera["focal"]
-    if isinstance(focal, (list, tuple)):
-        return tuple(focal)
-    return focal, focal
 
 
 def _load_openpose(path: str) -> np.ndarray:
@@ -119,7 +109,7 @@ def fit_measured_betas(
         openpose_joints,
         target_height,
         target_mass,
-        focal_length=_focal_pair(camera),
+        focal_length=focal_pair(camera["focal"]),
         camera_center=(camera["width"] / 2, camera["height"] / 2),
         center_joints=True,
         shoulder_width=shoulder_width,
@@ -152,9 +142,11 @@ def fit_betas(
     config=ShapeFitConfig(),
 ):
     """Compatibility wrapper for direct single-image SHAPify beta fitting."""
+    if focal_length is None:
+        raise ValueError("focal_length is required for single-image SHAPify fitting.")
 
     camera = {
-        "focal": DEFAULT_FOCAL if focal_length is None else focal_length,
+        "focal": focal_length,
         "width": DEFAULT_IMAGE_WIDTH if image_width is None else image_width,
         "height": DEFAULT_IMAGE_HEIGHT if image_height is None else image_height,
     }
@@ -184,7 +176,7 @@ def _project_vertices(vertices, cam, camera, device):
     return perspective_projection(
         points=vertices,
         translation=cam,
-        focal_length=torch.tensor(_focal_pair(camera), device=device).unsqueeze(0),
+        focal_length=torch.tensor(focal_pair(camera["focal"]), device=device).unsqueeze(0),
         camera_center=torch.tensor([camera["width"] / 2, camera["height"] / 2], device=device).unsqueeze(0),
     )
 
@@ -210,7 +202,7 @@ def run(config: dict) -> None:
 
     device = default_device()
     body_model = create_body_model(device)
-    camera = config["camera"]
+    camera_defaults = config.get("camera", {})
     loss = config["loss"]
     optimizer = _optimizer_config(config)
     input_dir = config["input_dir"]
@@ -223,12 +215,14 @@ def run(config: dict) -> None:
         pose_name = subject["pose"]
         image_path = os.path.join(input_dir, image_name)
         output_name = os.path.basename(image_name)
+        camera = subject_camera(subject, image_path, camera_defaults, label=image_name)
         pose = _load_openpose(os.path.join(input_dir, pose_name))
 
         pelvis = pose[8, :2]
         shoulder_width = np.sqrt(np.sum((pose[2, :2] - pose[5, :2]) ** 2))
-        offset_x = (pelvis[0] - camera["width"] / 2) / camera["focal"]
-        offset_y = (pelvis[1] - camera["height"] / 2) / camera["focal"]
+        fx, fy = focal_pair(camera["focal"])
+        offset_x = (pelvis[0] - camera["width"] / 2) / fx
+        offset_y = (pelvis[1] - camera["height"] / 2) / fy
 
         init_betas = prior_betas(subject.get("gender", "neutral"), device)
         _, _, smpl_shoulder, template_pose = _prepare_template_data(
@@ -238,7 +232,7 @@ def run(config: dict) -> None:
             config["template"]["pose_type"],
             config["template"]["leg_close"],
         )
-        offset_z = smpl_shoulder * camera["focal"] / shoulder_width
+        offset_z = smpl_shoulder * fx / shoulder_width
         cam_init = torch.tensor([offset_x * offset_z, offset_y * offset_z, offset_z], device=device).unsqueeze(0).float()
 
         new_out = fit_measured_betas(
@@ -265,15 +259,6 @@ def apply_cli_overrides(config: dict, args) -> dict:
         value = getattr(args, key, None)
         if value is not None:
             overrides[key] = value
-    camera = {}
-    if args.width is not None:
-        camera["width"] = args.width
-    if args.height is not None:
-        camera["height"] = args.height
-    if args.focal is not None:
-        camera["focal"] = args.focal
-    if camera:
-        overrides["camera"] = camera
     loss = {}
     for key in ("mass_loss_weight", "shoulder_loss_weight", "height_loss_weight", "beta_reg_weight"):
         value = getattr(args, key, None)
@@ -290,9 +275,6 @@ def main(argv=None):
     parser.add_argument("--subjects", type=str, help="Subjects JSON.")
     parser.add_argument("--input_dir", type=str, help="Input directory.")
     parser.add_argument("--output_dir", type=str, help="Output directory.")
-    parser.add_argument("--width", type=int, help="Image width in pixels.")
-    parser.add_argument("--height", type=int, help="Image height in pixels.")
-    parser.add_argument("--focal", type=float, help="Camera focal length in pixels.")
     parser.add_argument("--mass_loss_weight", type=float)
     parser.add_argument("--shoulder_loss_weight", type=float)
     parser.add_argument("--height_loss_weight", type=float)

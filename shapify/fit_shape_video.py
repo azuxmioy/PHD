@@ -16,9 +16,13 @@ The expected on-disk layout under ``input_dir / <subject_id>`` is either:
     cropped_new/<id>.jpg                (256x256 person crops)
     bbox/<id>.json                      ({"bbox": [cx, cy, scale], ...})
     openpose/<id>_keypoints.json
-    [params/<id>.pkl]                   (optional, per-frame focal + betas)
+    [params/<id>.pkl]                   (optional, CameraHMR init/metadata)
 
-  Raw (fallback):
+  Minimal:
+    rgb/<id>.jpg
+    openpose/<id>_keypoints.json        (or run OpenPose on the fly)
+
+  Raw:
     *.jpg / *.png                       (full-resolution frames; OpenPose+bbox
                                          run on the fly by the bundled
                                          OpenPose-135 detector)
@@ -43,11 +47,11 @@ from phd.utils.keypoints import SMPL_TO_OPENPOSE
 from phd.utils.geometry import perspective_projection
 
 from .config import (
-    DEFAULT_FOCAL,
     VideoShapeFitConfig,
     create_body_model,
     default_device,
     prior_betas,
+    subject_focal,
 )
 from .fitter import (
     VideoFrame,
@@ -64,7 +68,6 @@ DEFAULT_RUN_CONFIG = {
     "output_dir": "fit_shape_video",
     "pretrained_model_name_or_path": "checkpoints/pointdit",
     "n_frames": 12,
-    "focal_length": DEFAULT_FOCAL,
     "seed": None,
     "guidance_scale": 1.5,
     "num_inference_steps": 5,
@@ -77,7 +80,8 @@ DEFAULT_RUN_CONFIG = {
         "weights_dir": None,
         "no_hand": False,
         "with_face": False,
-        "bbox_scale": 1.25,
+        "bbox_scale": 1.3,
+        "bbox_keypoint_thresh": 0.5,
         "keypoint_thresh": 0.1,
     },
     "pnp_conf_thresh": 0.3,           # OpenPose conf threshold for PnP camera init
@@ -103,17 +107,21 @@ def _select_frames(image_paths: List[Path], n_frames: int) -> List[Path]:
     return [image_paths[i] for i in idx]
 
 
-def _image_args(config: dict) -> SimpleNamespace:
+def _image_args(config: dict, subject: dict, output_name: str) -> SimpleNamespace:
     op = config["openpose"]
     return SimpleNamespace(
-        focal_length=float(config["focal_length"]),
+        focal_length=float(subject_focal(subject, label=output_name)),
         betas_path=None,
         openpose_device=op["device"],
         openpose_weights_dir=op["weights_dir"],
         openpose_no_hand=op["no_hand"],
         openpose_with_face=op["with_face"],
         openpose_bbox_scale=op["bbox_scale"],
+        openpose_bbox_keypoint_thresh=op.get("bbox_keypoint_thresh", 0.5),
         openpose_keypoint_thresh=op["keypoint_thresh"],
+        metadata_dir=None,
+        metadata_file=None,
+        keypoints_dir=None,
     )
 
 
@@ -290,7 +298,7 @@ def _resolve_subject_frames(input_dir: Path, subject: dict, config: dict) -> Lis
     return _select_frames(paths, int(config["n_frames"]))
 
 
-def _maybe_create_detector(input_dir: Path, subject: dict, config: dict, cache):
+def _maybe_create_detector(input_dir: Path, subject: dict, config: dict, output_name: str, cache):
     """Create OpenPose-135 detector lazily, only for raw (unprepared) folders."""
     from fitting.helper.image_inputs import create_openpose_detector, is_prepared_image_folder
 
@@ -299,8 +307,10 @@ def _maybe_create_detector(input_dir: Path, subject: dict, config: dict, cache):
     prepared = is_prepared_image_folder(subject_root) if subject_root.exists() else False
     if prepared or "frames" in subject:
         return None, prepared, subject_root
+    if (subject_root / "openpose").is_dir():
+        return None, prepared, subject_root
     if cache.get("detector") is None:
-        cache["detector"] = create_openpose_detector(_image_args(config))
+        cache["detector"] = create_openpose_detector(_image_args(config, subject, output_name))
     return cache["detector"], prepared, subject_root
 
 
@@ -408,12 +418,12 @@ def run(config: dict) -> None:
 
     loss = config["loss"]
     optimizer = _optimizer_config(config)
-    image_args = _image_args(config)
     detector_cache: dict = {}
 
     for subject in subjects:
         output_name = subject.get("id", Path(subject.get("subject_dir", subject.get("image", "subject"))).stem)
-        detector, prepared, subject_root = _maybe_create_detector(input_dir, subject, config, detector_cache)
+        image_args = _image_args(config, subject, output_name)
+        detector, prepared, subject_root = _maybe_create_detector(input_dir, subject, config, output_name, detector_cache)
         frame_paths = _resolve_subject_frames(input_dir, subject, config)
 
         fit_inputs = []
@@ -484,8 +494,6 @@ def apply_cli_overrides(config: dict, args) -> dict:
             overrides[key] = value
     if args.n_frames is not None:
         overrides["n_frames"] = args.n_frames
-    if args.focal_length is not None:
-        overrides["focal_length"] = args.focal_length
     if args.seed is not None:
         overrides["seed"] = args.seed
     loss = {}
@@ -512,7 +520,6 @@ def main(argv=None):
     parser.add_argument("--output_dir", type=str, help="Output directory.")
     parser.add_argument("--pretrained_model_name_or_path", type=str, help="PointDiT checkpoint dir.")
     parser.add_argument("--n_frames", type=int, help="Number of evenly-sampled frames per subject.")
-    parser.add_argument("--focal_length", type=float, help="Smartphone focal length in pixels.")
     parser.add_argument("--seed", type=int, help="Optional random seed.")
     parser.add_argument("--mass_loss_weight", type=float)
     parser.add_argument("--height_loss_weight", type=float)

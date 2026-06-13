@@ -2,6 +2,7 @@
     {
         "image": "subject0.jpg",
         "pose": "subject0_keypoints.json",
+        "focal": 1436.0,
         "height": 1.77,
         "weight": 60,
         "gender": "male"
@@ -9,6 +10,7 @@
     {
         "image": "subject1.jpg",
         "pose": "subject1_keypoints.json",
+        "focal": 1436.0,
         "height": 1.68,
         "weight": 60,
         "gender": "female"
