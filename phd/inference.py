@@ -161,7 +161,46 @@ def _build_dataset(args: argparse.Namespace):
     return TestDiffDataset(args)
 
 
+def _expand_betas_for_samples(betas: torch.Tensor, num_images_per_prompt: int, num_samples: int) -> torch.Tensor:
+    if betas.ndim == 1:
+        betas = betas.unsqueeze(0)
+    if betas.shape[0] == num_samples:
+        return betas
+    if betas.shape[0] == 1:
+        return betas.expand(num_samples, -1)
+
+    expanded = betas.repeat_interleave(num_images_per_prompt, dim=0)
+    if expanded.shape[0] != num_samples:
+        raise ValueError(f"Cannot expand betas from {tuple(betas.shape)} to {num_samples} samples")
+    return expanded
+
+
+def _sample_betas_for_inference(
+    args: argparse.Namespace,
+    data: dict,
+    generator: torch.Generator | None,
+    device: torch.device,
+) -> torch.Tensor:
+    num_samples = data["input_tensor"].shape[0] * args.num_validation_images
+    base_betas = data["cond_betas"]
+    if base_betas.ndim == 1:
+        base_betas = base_betas.unsqueeze(0)
+
+    if not args.random_shape_betas:
+        return _expand_betas_for_samples(base_betas, args.num_validation_images, num_samples)
+
+    betas = torch.randn(
+        (num_samples, base_betas.shape[-1]),
+        generator=generator,
+        device=device,
+        dtype=base_betas.dtype,
+    )
+    data["cond_betas_per_sample"] = betas
+    return betas
+
+
 def _vertices_from_samples(args, body_model, fitter, poses: torch.Tensor, betas: torch.Tensor) -> list[np.ndarray]:
+    betas = _expand_betas_for_samples(betas.to(poses.device), 1, poses.shape[0])
     if args.use_vertices:
         mean_points, std_points = load_point_statistics()
         pred_points = mean_points[None].to(poses.device) + poses.detach() * std_points[None].to(poses.device)
@@ -172,7 +211,7 @@ def _vertices_from_samples(args, body_model, fitter, poses: torch.Tensor, betas:
             joints,
             n_iter=3,
             beta_regularizer=1,
-            initial_shape_betas=betas.repeat(surface_kp.shape[0], 1),
+            initial_shape_betas=betas,
         )
 
         vertices = []
@@ -191,7 +230,7 @@ def _vertices_from_samples(args, body_model, fitter, poses: torch.Tensor, betas:
         smpl_out = body_model(
             global_orient=pose_rotmat[:1].unsqueeze(0),
             body_pose=pose_rotmat[1:].unsqueeze(0),
-            betas=betas,
+            betas=betas[idx:idx + 1],
             pose2rot=False,
         )
         vertices.append(smpl_out.vertices[0].detach().cpu().numpy())
@@ -254,6 +293,7 @@ def run(args: argparse.Namespace) -> None:
                     save_dir / f"{file_name}_gt.obj"
                 )
 
+        sample_betas = _sample_betas_for_inference(args, data, generator, device)
         with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
             poses, _ = pipeline(
                 data,
@@ -265,8 +305,7 @@ def run(args: argparse.Namespace) -> None:
                 mode="test",
             )
 
-        betas = data["cond_betas"][:1]
-        sample_vertices = _vertices_from_samples(args, body_model, fitter, poses, betas)
+        sample_vertices = _vertices_from_samples(args, body_model, fitter, poses, sample_betas)
         for sample_idx, vertices in enumerate(sample_vertices):
             trimesh.Trimesh(vertices=vertices, faces=body_model.faces, process=False).export(
                 save_dir / f"{file_name}_{sample_idx:02d}.obj"
@@ -316,6 +355,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num_workers", type=int, default=0, help="DataLoader worker count.")
     parser.add_argument("--max_images", type=int, default=None, help="Optional cap on processed examples.")
     parser.add_argument("--betas_path", type=str, default=None, help="Optional default beta vector for prepared crops.")
+    parser.add_argument(
+        "--random_shape_betas",
+        "--random-shape-betas",
+        dest="random_shape_betas",
+        action="store_true",
+        help="Condition each generated sample on an independent SMPL beta vector sampled from N(0, I).",
+    )
     parser.add_argument("--save_gt_mesh", action="store_true", help="Also export ground-truth meshes when present.")
     parser.add_argument("--use_heatmap", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--use_vertices", action=argparse.BooleanOptionalAction, default=True)

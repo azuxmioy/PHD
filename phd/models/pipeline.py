@@ -251,7 +251,15 @@ class PoseDiTPipeline(DiffusionPipeline):
             heatmap = torch.cat([heatmap] * 2) if guidance_scale > 1 else heatmap
 
         # cond_betas: (B_in, beta_dim) -> repeat to (B_in * num_images_per_prompt, beta_dim).
-        class_labels = data["cond_betas"].repeat_interleave(num_images_per_prompt, dim=0)
+        # Inference can optionally provide per-sample betas with this expanded
+        # shape, e.g. for sampling multiple poses conditioned on random shapes.
+        class_labels = data.get("cond_betas_per_sample")
+        if class_labels is None:
+            class_labels = data["cond_betas"].repeat_interleave(num_images_per_prompt, dim=0)
+        elif class_labels.shape[0] != n_total:
+            raise ValueError(
+                f"cond_betas_per_sample must have {n_total} rows, got {class_labels.shape[0]}"
+            )
         class_null = torch.zeros_like(class_labels)
         class_labels_input = torch.cat([class_labels, class_null], 0) if guidance_scale > 1 else class_labels
         class_labels_input = class_labels_input.to(device=device)

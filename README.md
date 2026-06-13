@@ -418,6 +418,11 @@ python -m phd.inference \
     --save_gt_mesh
 ```
 
+Add `--random_shape_betas` to condition each generated sample on an independent
+SMPL beta vector sampled from a zero-mean unit normal distribution. This is
+useful for checking how the point prior behaves across random body shapes while
+keeping the input image fixed.
+
 When using a newly trained model for inference, pass an Accelerate checkpoint
 directory such as `checkpoint-2194` that contains a `transformer/` subfolder.
 The final bare `diffusion_pytorch_model.safetensors` save is not enough for

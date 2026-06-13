@@ -229,6 +229,17 @@ python -m phd.inference \
   --save_gt_mesh
 ```
 
+To keep the input image fixed but condition each generated sample on a different
+random body shape, add:
+
+```bash
+--random_shape_betas
+```
+
+This samples one zero-mean, unit-standard-deviation 10D SMPL beta vector per
+generated sample and uses the same beta row for the PointDiT condition and the
+SMPL/fitter reconstruction.
+
 Outputs:
 
 ```text
