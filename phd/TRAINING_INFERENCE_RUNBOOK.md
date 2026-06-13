@@ -135,7 +135,7 @@ Run inference with the released checkpoint:
 
 ```bash
 python -m phd.inference \
-    --test_data_dir demo_data/single \
+    --test_data_dir demo_new/image \
     --pretrained_model_name_or_path checkpoints/pointdit \
     --output_path inference \
     --exp_name pointdit_original \
@@ -149,7 +149,7 @@ Use a newly trained Accelerate checkpoint by passing the checkpoint directory:
 
 ```bash
 python -m phd.inference \
-    --test_data_dir demo_data/single \
+    --test_data_dir demo_new/image \
     --pretrained_model_name_or_path outputs/pointdit_smoke/checkpoint-1000 \
     --output_path inference \
     --exp_name pointdit_smoke \
@@ -164,7 +164,7 @@ Shape-conditioning options:
 ```bash
 # Shared SHAPify shape:
 python -m phd.inference \
-    --test_data_dir demo_data/single \
+    --test_data_dir demo_new/image \
     --pretrained_model_name_or_path checkpoints/pointdit \
     --output_path inference \
     --exp_name shaped \
@@ -172,7 +172,7 @@ python -m phd.inference \
 
 # Random shape per generated sample:
 python -m phd.inference \
-    --test_data_dir demo_data/single \
+    --test_data_dir demo_new/image \
     --pretrained_model_name_or_path checkpoints/pointdit \
     --output_path inference \
     --exp_name random_shapes \

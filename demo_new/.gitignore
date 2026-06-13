@@ -1,6 +1,7 @@
 *
 !.gitignore
 !README.md
-!image_metadata.json
-!image_subjects.json
-!video_subjects.json
+!image/
+!image/*_subjects.json
+!video/
+!video/video_subjects.json

@@ -1,11 +1,11 @@
 import argparse
 import copy
-import json
 import os
 import pickle
 from pathlib import Path
 
 import cv2
+import numpy as np
 import trimesh
 
 import torch
@@ -21,12 +21,12 @@ from fitting.helper.image_inputs import (
     add_image_input_args,
     create_openpose_detector,
     find_keypoints_path,
-    is_prepared_image_folder,
     list_input_images,
     load_image_fit_input,
     load_fitting_metadata,
 )
 from fitting.helper.init_params import initialize_from_pointdit
+from fitting.helper.shape_inputs import add_shape_input_args, ensure_shapify_shape, load_shape_subject
 from fitting.helper.visualization import add_render_args, create_renderer, render_overlay
 
 from phd.utils.assets import smpl_model_path, smplfitter_data_root
@@ -85,113 +85,33 @@ def _iter_video_folders(args):
 
 
 def _sequence_args(args, folder_path):
-    sequence_args = copy.copy(args)
-    if getattr(sequence_args, "betas_path", None) is None:
-        shape_path = Path(folder_path) / "neutral_shape.npy"
-        if shape_path.exists():
-            sequence_args.betas_path = str(shape_path)
-    return sequence_args
+    return copy.copy(args)
 
 
-def _shape_subject_candidates(args, folder_path):
-    folder_path = Path(folder_path)
-    candidates = []
-    if getattr(args, "shape_subjects", None):
-        candidates.append(Path(args.shape_subjects))
-    candidates.extend([
-        folder_path / "subjects.json",
-        folder_path / "shape_subjects.json",
-        folder_path.parent / "video_subjects.json",
-        Path(args.test_data_dir) / "video_subjects.json",
-    ])
-
-    seen = set()
-    for candidate in candidates:
-        candidate = candidate.expanduser()
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        if candidate.exists():
-            yield candidate
-
-
-def _load_shape_subjects(args, folder_path):
-    for path in _shape_subject_candidates(args, folder_path):
-        with open(path, "r") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            data = data.get("subjects", [data])
-        if not isinstance(data, list):
-            raise ValueError(f"Expected a subject list in {path}.")
-        return data, path
-    return None, None
-
-
-def _match_shape_subject(args, folder_path, person_name, take_name):
-    subjects, path = _load_shape_subjects(args, folder_path)
-    if not subjects:
-        return None, path
-    if len(subjects) == 1:
-        return dict(subjects[0]), path
-
-    folder_path = Path(folder_path)
-    input_root = Path(args.test_data_dir)
-    labels = {
-        folder_path.name,
-        take_name,
-        person_name,
-        f"{person_name}/{take_name}",
-        folder_path.as_posix(),
-    }
-    try:
-        labels.add(folder_path.relative_to(input_root).as_posix())
-    except ValueError:
-        pass
-
-    for subject in subjects:
-        for key in ("id", "subject", "sequence", "subject_dir", "video_dir"):
-            value = subject.get(key)
-            if value is not None and str(value) in labels:
-                return dict(subject), path
-    return None, path
-
-
-def _relative_to(path, root):
-    path = Path(path)
-    root = Path(root)
-    try:
-        return path.relative_to(root).as_posix()
-    except ValueError:
-        return path.as_posix()
-
-
-def _camera_from_K(K, width, height):
-    return {
-        "focal": [float(K[0, 0]), float(K[1, 1])],
-        "width": int(width),
-        "height": int(height),
-    }
-
-
-def _run_first_frame_shapify(args, sequence_args, folder_path, person_name, take_name, prepared, image_list):
+def _run_first_frame_shapify(args, sequence_args, folder_path, person_name, take_name, image_list):
     if getattr(sequence_args, "betas_path", None):
         return sequence_args
+    if args.no_first_frame_shape:
+        raise ValueError(f"{folder_path} has no --betas_path and first-frame SHAPify fallback is disabled.")
 
-    subject, subjects_path = _match_shape_subject(args, folder_path, person_name, take_name)
+    labels = (folder_path.name, take_name, person_name, f"{person_name}/{take_name}", folder_path.as_posix())
+    subject, subjects_path = load_shape_subject(args, folder_path, image_path=image_list[0] if image_list else None, video=True, labels=labels)
     if subject is None:
         source = f" in {subjects_path}" if subjects_path else ""
         raise ValueError(
-            f"{folder_path} has no shape betas. Pass --betas_path, place neutral_shape.npy in the video folder, "
-            f"or provide --shape_subjects with height/weight/gender measurements{source}."
+            f"{folder_path} has no shape betas. Pass --betas_path or provide --shape_subjects "
+            f"with height/weight/gender measurements{source}."
         )
     if not image_list:
         raise ValueError(f"No rgb frames found in {folder_path}.")
 
     first_frame = Path(image_list[0])
+    shape_args = copy.copy(sequence_args)
+    if subject.get("camera") is not None:
+        shape_args.metadata_override = {"camera": subject["camera"]}
     keypoints_path = find_keypoints_path(
         first_frame,
-        sequence_args,
-        prepared_root=folder_path if prepared else None,
+        shape_args,
     )
     if keypoints_path is None:
         raise ValueError(
@@ -204,47 +124,23 @@ def _run_first_frame_shapify(args, sequence_args, folder_path, person_name, take
     height, width = full_image.shape[:2]
     K, _ = load_fitting_metadata(
         first_frame,
-        sequence_args,
+        shape_args,
         width,
         height,
-        prepared_root=folder_path if prepared else None,
         load_betas=False,
     )
 
-    first_subject = {
-        key: value
-        for key, value in subject.items()
-        if key not in {"image", "pose", "subject_dir", "video_dir", "sequence"}
-    }
-    first_subject["image"] = _relative_to(first_frame, folder_path)
-    first_subject["pose"] = _relative_to(keypoints_path, folder_path)
-    first_subject.setdefault("camera", _camera_from_K(K, width, height))
-
-    shape_root = Path(args.shape_output_dir) if args.shape_output_dir else Path(folder_path) / "shapify_first_frame"
-    shape_root.mkdir(parents=True, exist_ok=True)
-    first_subjects_path = shape_root / "first_frame_subjects.json"
-    with open(first_subjects_path, "w") as f:
-        json.dump([first_subject], f, indent=4)
-
-    from shapify.fit_shape import DEFAULT_RUN_CONFIG, run as run_shapify
-    from shapify.fitter import load_run_config, merge_dict
-
-    config = merge_dict(
-        load_run_config(DEFAULT_RUN_CONFIG, args.shape_config),
-        {
-            "subjects": str(first_subjects_path),
-            "input_dir": str(folder_path),
-            "output_dir": str(shape_root),
-        },
-    )
-    print(f"[shape] no betas found for {folder_path}; running SHAPify on {first_frame.name}")
-    run_shapify(config)
-
-    betas_path = shape_root / f"neutral_shape{first_frame.name}.npy"
-    if not betas_path.exists():
-        raise FileNotFoundError(f"Expected SHAPify output was not written: {betas_path}")
-
-    sequence_args.betas_path = str(betas_path)
+    sequence_args.betas_path = str(ensure_shapify_shape(
+        shape_args,
+        root=folder_path,
+        image_path=first_frame,
+        keypoints_path=keypoints_path,
+        K=K,
+        width=width,
+        height=height,
+        video=True,
+        labels=labels,
+    ))
     return sequence_args
 
 
@@ -258,14 +154,23 @@ def _sequence_save_path(args, folder_path, person_name, take_name):
     return Path(folder_path) / args.exp_name
 
 
-def _needs_detector(args, folder_path, prepared):
-    if prepared:
-        return False
+def _video_cache_root(args, folder_path):
+    if args.processed_dir:
+        return Path(args.processed_dir)
+    return Path(folder_path) / "processed"
+
+
+def _needs_detector(args, folder_path):
     if getattr(args, "keypoints_dir", None):
         return False
     if (Path(folder_path) / "openpose").is_dir():
         return False
     return True
+
+
+def _chunks(items, chunk_size):
+    for start in range(0, len(items), chunk_size):
+        yield items[start:start + chunk_size]
 
 
 def main(args):
@@ -287,72 +192,91 @@ def main(args):
     SMPL_neutral = SMPL_neutral.to(device)
     detector = None
     for person_name, take_name, folder_path in _iter_video_folders(args):
-        prepared = is_prepared_image_folder(folder_path)
         sequence_args = _sequence_args(args, folder_path)
-        image_list = list_input_images(folder_path, prepared=prepared)
+        image_list = list_input_images(folder_path, prepared=False)
         sequence_args = _run_first_frame_shapify(
             args,
             sequence_args,
             folder_path,
             person_name,
             take_name,
-            prepared,
             image_list,
         )
-        if detector is None and _needs_detector(sequence_args, folder_path, prepared):
+        if detector is None and _needs_detector(sequence_args, folder_path):
             detector = create_openpose_detector(sequence_args)
 
         save_path = _sequence_save_path(args, folder_path, person_name, take_name)
         save_path.mkdir(parents=True, exist_ok=True)
+        cache_root = _video_cache_root(sequence_args, folder_path)
 
         prev_params = None
-        for idx, image_path in tqdm(enumerate(image_list), total=len(image_list)):
-            sample = load_image_fit_input(
-                image_path,
-                sequence_args,
-                prepared_root=folder_path if prepared else None,
-                detector=detector,
-            )
-            file_name = sample.file_name
-            full_image = sample.full_image
-            H, W = full_image.shape[:2]
-            cam_R_inv = sample.cam_R_inv
-            if cam_R_inv is None:
-                cam_R_inv = torch.eye(3, dtype=torch.float32)
+        effective_bs = 1 if sequence_args.per_frame else sequence_args.batch_size
+        for batch_paths in tqdm(list(_chunks(image_list, effective_bs)), desc=take_name):
+            samples = [
+                load_image_fit_input(
+                    image_path,
+                    sequence_args,
+                    detector=detector,
+                    cache_root=cache_root,
+                )
+                for image_path in batch_paths
+            ]
 
-            data = {}
-            data['input_tensor'] = IMAGE_TRANSFORM(sample.crop_image).unsqueeze(0).to(device)
-            data['cond_betas'] = torch.from_numpy(sample.betas).view(1, -1).float().to(device)
+            init_global = []
+            init_body = []
+            init_camera = []
+            for sample in samples:
+                H, W = sample.full_image.shape[:2]
+                sample_data = {
+                    'input_tensor': IMAGE_TRANSFORM(sample.crop_image).unsqueeze(0).to(device),
+                    'cond_betas': torch.from_numpy(sample.betas).view(1, -1).float().to(device),
+                }
+                initialization = initialize_from_pointdit(
+                    SMPL_neutral,
+                    fitter,
+                    pipeline,
+                    sample_data,
+                    args,
+                    generator,
+                    sample.keypoints,
+                    sample.K,
+                    sample.bbox,
+                    image_size=(H, W),
+                    prev_params=prev_params if sequence_args.per_frame else None,
+                    reuse_prev_camera=sequence_args.per_frame and prev_params is not None,
+                    debug_dir=str(save_path) if args.debug else None,
+                    debug_name=sample.file_name if args.debug else None,
+                )
+                init_global.append(initialization.init_params["global_orient"])
+                init_body.append(initialization.init_params["body_pose"])
+                init_camera.append(initialization.init_params["camera"])
+                render_overlay(
+                    renderer,
+                    sample.full_image,
+                    initialization.vertices[0],
+                    initialization.camera[0],
+                    sample.K,
+                    str(save_path / f"{sample.file_name}_init.jpg"),
+                )
 
-            initialization = initialize_from_pointdit(
-                SMPL_neutral,
-                fitter,
-                pipeline,
-                data,
-                args,
-                generator,
-                sample.keypoints,
-                sample.K,
-                sample.bbox,
-                image_size=(H, W),
-                prev_params=prev_params,
-                reuse_prev_camera=idx != 0,
-                extra_init_params={'cam_R_inv': cam_R_inv.to(device).detach()},
-                debug_dir=str(save_path) if args.debug else None,
-                debug_name=file_name if args.debug else None,
-            )
-
-            if args.debug:
-                print(initialization.camera)
-
-            render_overlay(
-                renderer,
-                full_image,
-                initialization.vertices[0],
-                initialization.camera[0],
-                sample.K,
-                str(save_path / f"{file_name}_init.jpg"),
-            )
+            data = {
+                'input_tensor': torch.stack(
+                    [IMAGE_TRANSFORM(sample.crop_image) for sample in samples],
+                    dim=0,
+                ).to(device),
+                'cond_betas': torch.stack(
+                    [torch.from_numpy(sample.betas).view(-1).float() for sample in samples],
+                    dim=0,
+                ).to(device),
+            }
+            init_params = {
+                "global_orient": torch.cat(init_global, dim=0).contiguous(),
+                "body_pose": torch.cat(init_body, dim=0).contiguous(),
+                "camera": torch.cat(init_camera, dim=0).contiguous(),
+            }
+            kp_batch = torch.stack([sample.keypoints for sample in samples], dim=0)
+            K_batch = torch.from_numpy(np.stack([sample.K for sample in samples], axis=0)).float()
+            bbox_batch = torch.tensor([sample.bbox for sample in samples], dtype=torch.float32)
 
             out_params = fit_batch(
                 SMPL_neutral,
@@ -361,45 +285,49 @@ def main(args):
                 args,
                 generator,
                 pipeline,
-                initialization.init_params,
-                sample.keypoints,
-                sample.K,
-                sample.bbox,
-                prev_params,
+                init_params,
+                kp_batch,
+                K_batch,
+                bbox_batch,
+                prev_params if sequence_args.per_frame else None,
                 keypoint_type='openpose25',
             )
-            prev_params = out_params
+            if sequence_args.per_frame:
+                prev_params = out_params
 
-            smpl_output = SMPL_neutral( global_orient=out_params['global_orient'],
-                          body_pose=out_params['body_pose'],
-                          betas=data['cond_betas'],
-                          pose2rot=False)
-
-            prev_params['pred_vertices'] = smpl_output.vertices.detach()
-            prev_params['pred_joints'] = smpl_output.joints.detach()
-
-            v = smpl_output.vertices[0].detach().cpu().numpy()
-            render_overlay(
-                renderer,
-                full_image,
-                v,
-                out_params['camera'][0],
-                sample.K,
-                str(save_path / f"{file_name}_fit.jpg"),
+            smpl_output = SMPL_neutral(
+                global_orient=out_params['global_orient'],
+                body_pose=out_params['body_pose'],
+                betas=data['cond_betas'],
+                pose2rot=False,
             )
 
-            t = trimesh.Trimesh(vertices = v, faces = SMPL_neutral.faces, process=False)
-            t.export(save_path / f"{file_name}_avg.obj")
+            out_params['pred_vertices'] = smpl_output.vertices.detach()
+            out_params['pred_joints'] = smpl_output.joints.detach()
 
-            with open(save_path / f"{file_name}_params.pkl", 'wb') as f:
-                out_dict = {
-                    'body_pose': out_params['body_pose'].cpu().numpy(),
-                    'global_orient': out_params['global_orient'].cpu().numpy(),
-                    'betas': out_params['betas'].cpu().numpy(),
-                    'camera': out_params['camera'].cpu().numpy(),
-                    'K': sample.K,
+            for local_idx, sample in enumerate(samples):
+                v = smpl_output.vertices[local_idx].detach().cpu().numpy()
+                render_overlay(
+                    renderer,
+                    sample.full_image,
+                    v,
+                    out_params['camera'][local_idx],
+                    sample.K,
+                    str(save_path / f"{sample.file_name}_fit.jpg"),
+                )
+
+                t = trimesh.Trimesh(vertices=v, faces=SMPL_neutral.faces, process=False)
+                t.export(save_path / f"{sample.file_name}_avg.obj")
+
+                with open(save_path / f"{sample.file_name}_params.pkl", 'wb') as f:
+                    out_dict = {
+                        'body_pose': out_params['body_pose'][local_idx:local_idx + 1].cpu().numpy(),
+                        'global_orient': out_params['global_orient'][local_idx:local_idx + 1].cpu().numpy(),
+                        'betas': out_params['betas'][local_idx:local_idx + 1].cpu().numpy(),
+                        'camera': out_params['camera'][local_idx:local_idx + 1].cpu().numpy(),
+                        'K': sample.K,
                     }
-                pickle.dump(out_dict, f)
+                    pickle.dump(out_dict, f)
 
 if __name__ == "__main__":
 
@@ -412,7 +340,7 @@ if __name__ == "__main__":
         "-t",
         "--test_data_dir",
         type=str,
-        default="./",
+        default="demo_new/video",
         help=(
             "Path to a video folder with rgb/ frames, or a root with <subject>/<sequence>/rgb folders."
         ),
@@ -450,27 +378,7 @@ if __name__ == "__main__":
         default=None,
         help="Optional sequence folders under each subject. Defaults to all folders found.",
     )
-    parser.add_argument(
-        "--shape_subjects",
-        type=str,
-        default=None,
-        help=(
-            "Subject measurements JSON used to run SHAPify on the first frame when "
-            "--betas_path and neutral_shape.npy are missing."
-        ),
-    )
-    parser.add_argument(
-        "--shape_config",
-        type=str,
-        default="shapify/configs/measured.yaml",
-        help="SHAPify config used by the first-frame shape fallback.",
-    )
-    parser.add_argument(
-        "--shape_output_dir",
-        type=str,
-        default=None,
-        help="Optional output directory for first-frame SHAPify fallback. Defaults to <video>/shapify_first_frame.",
-    )
+    parser.add_argument("--batch_size", type=int, default=64, help="Frames per fit_batch call.")
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument(
         "--guidance_scale",
@@ -520,16 +428,23 @@ if __name__ == "__main__":
     )
     add_render_args(parser)
     add_image_input_args(parser)
+    add_shape_input_args(parser, video=True)
 
     add_fit_batch_args(parser, defaults={
-        "n_sample": 1,
-        "n_iter": 100,
+        "n_sample": 4,
+        "n_iter": 50,
         "w_kp": 10.0,
-        "w_smooth": 100.0,
+        "w_smooth": 1.0,
+        "smooth_intra": True,
+        "smooth_intra_weight": 10.0,
+        "smooth_causal": True,
+        "w_jitter": 0.2,
+        "w_reg_init": 0.5,
+        "gmof_sigma": 100.0,
         "w_point": 100.0,
         "lr_cam": 1e-3,
-        "lr_pose": 1e-3,
-        "lr_orient": 1e-3,
+        "lr_pose": 1e-4,
+        "lr_orient": 1e-5,
         "hand_loss_weight": 0.2,
         "hand_pose_reg_weight": 0.0,
         "point_pose_weight": 1.0,

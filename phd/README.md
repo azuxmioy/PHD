@@ -19,14 +19,14 @@ pipeline.
 The quick launcher is:
 
 ```bash
-bash scripts/run_pointdit_inference.sh demo_data/single demo_outputs/pointdit
+bash scripts/run_pointdit_inference.sh demo_new/image demo_outputs/pointdit
 ```
 
 Equivalent Python command:
 
 ```bash
 python -m phd.inference \
-    --test_data_dir demo_data/single \
+    --test_data_dir demo_new/image \
     --output_path demo_outputs/pointdit \
     --exp_name pointdit_samples \
     --pretrained_model_name_or_path checkpoints/pointdit \
@@ -34,22 +34,20 @@ python -m phd.inference \
     --num_inference_steps 20
 ```
 
-The lightweight inference path expects:
+The public inference path expects raw images:
 
 ```text
 test_data_dir/
-+-- cropped_new/
-    +-- <id>.png
-+-- params/              # optional
-    +-- <id>.pkl         # optional, can contain {"betas": ...}
++-- <id>.jpg
++-- <id>_keypoints.json         # optional; otherwise detector runs
 ```
 
-If `params/<id>.pkl` is missing, inference uses zero betas unless a shared beta
-file is provided:
+Generated crops and bboxes are cached under `processed/` by default. Inference
+uses zero betas unless a shared SHAPify beta file is provided:
 
 ```bash
 bash scripts/run_pointdit_inference.sh \
-    demo_data/single \
+    demo_new/image \
     demo_outputs/pointdit \
     shaped_samples \
     checkpoints/pointdit \
@@ -61,7 +59,7 @@ fixed:
 
 ```bash
 bash scripts/run_pointdit_inference.sh \
-    demo_data/single \
+    demo_new/image \
     demo_outputs/pointdit \
     random_shape_samples \
     checkpoints/pointdit \
@@ -133,9 +131,10 @@ Set `global.pretrained_model_name_or_path` in the YAML, or pass
 
 | Argument | Script | Meaning |
 |---|---|---|
-| `--test_data_dir` | `inference.py` | Prepared crop folder or legacy test dataset root. |
-| `--betas_path` | `inference.py` | Shared 10-D beta vector for prepared crops. |
+| `--test_data_dir` | `inference.py` | Raw image, raw image folder, video folder with `rgb/`, or legacy test-data root. |
+| `--betas_path` | `inference.py` | Shared 10-D beta vector, usually from SHAPify. |
 | `--random_shape_betas` | `inference.py` | Sample independent random betas per generated sample. |
+| `--processed_dir`, `--no_processed_cache` | `inference.py` | Control the generated crop/bbox cache. |
 | `--num_validation_images` | `inference.py` | Number of samples per input image. |
 | `--num_inference_steps` | `inference.py` | Denoising steps. |
 | `--pretrained_model_name_or_path` | inference/training | PointDiT checkpoint or model path. |

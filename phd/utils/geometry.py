@@ -338,8 +338,18 @@ def find_cam_pos(points_3d: torch.Tensor, keypoints_2d: torch.Tensor, intrinsics
     intrinsics = torch.as_tensor(intrinsics, device=points_3d.device, dtype=points_3d.dtype)
     batch_size, n_joint, _ = points_3d.shape
 
-    fx, skew, cx = intrinsics[0]
-    _, fy, cy = intrinsics[1]
+    if intrinsics.ndim == 2:
+        intrinsics = intrinsics.unsqueeze(0).expand(batch_size, -1, -1)
+    elif intrinsics.ndim != 3:
+        raise ValueError(f"Expected intrinsics with shape (3,3) or (B,3,3), got {tuple(intrinsics.shape)}")
+    if intrinsics.shape[0] != batch_size:
+        raise ValueError(f"Expected {batch_size} intrinsics, got {intrinsics.shape[0]}")
+
+    fx = intrinsics[:, 0, 0].view(batch_size, 1).expand(-1, n_joint)
+    skew = intrinsics[:, 0, 1].view(batch_size, 1).expand(-1, n_joint)
+    cx = intrinsics[:, 0, 2].view(batch_size, 1).expand(-1, n_joint)
+    fy = intrinsics[:, 1, 1].view(batch_size, 1).expand(-1, n_joint)
+    cy = intrinsics[:, 1, 2].view(batch_size, 1).expand(-1, n_joint)
     x_3d, y_3d, z_3d = points_3d[:, :, 0], points_3d[:, :, 1], points_3d[:, :, 2]
     u_2d, v_2d = keypoints_2d[:, :, 0], keypoints_2d[:, :, 1]
 

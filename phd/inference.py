@@ -1,8 +1,8 @@
 """PointDiT inference entry point.
 
 Reusable factories and file helpers live under :mod:`phd.utils`. This module is
-kept as the runnable program for generating PointDiT samples from prepared test
-data, while re-exporting the common helpers for older scripts.
+kept as the runnable program for generating PointDiT samples from raw image
+folders, while re-exporting common helpers for older scripts.
 """
 
 from __future__ import annotations
@@ -42,6 +42,17 @@ from phd.utils.modeling import (
 )
 from phd.utils.surface import SURFACE_KP
 from phd.utils.visualization import image_grid, rgba_to_rgb, tensor_to_np
+from fitting.helper.image_inputs import (
+    add_image_input_args,
+    bbox_from_keypoints,
+    create_openpose_detector,
+    crop_rgb_image,
+    find_keypoints_path,
+    list_input_images,
+    load_processed_cache,
+    openpose_people_to_keypoints,
+    save_processed_cache,
+)
 
 check_min_version("0.24.0")
 
@@ -99,8 +110,19 @@ def _enable_xformers(pipeline):
     pipeline.enable_xformers_memory_efficient_attention()
 
 
+def _load_beta_vector(path: Path) -> np.ndarray:
+    if path.suffix == ".npy":
+        betas = np.load(path)
+    else:
+        with open(path, "rb") as f:
+            betas = pickle.load(f)
+            if isinstance(betas, dict):
+                betas = betas.get("betas", betas)
+    return np.asarray(betas).reshape(-1)[:10].astype(np.float32)
+
+
 class PreparedCropDataset:
-    """Minimal prepared-folder dataset for PointDiT-only inference."""
+    """Legacy prepared-folder dataset for PointDiT-only inference."""
 
     def __init__(self, root: str | Path, betas_path: str | None = None):
         self.root = Path(root)
@@ -141,24 +163,95 @@ class PreparedCropDataset:
         if self.betas_path is None:
             return np.zeros(10, dtype=np.float32)
 
-        if self.betas_path.suffix == ".npy":
-            betas = np.load(self.betas_path)
+        return _load_beta_vector(self.betas_path)
+
+
+class RawImageDataset:
+    """Raw image folder dataset that creates/reuses the processed crop cache."""
+
+    def __init__(self, root: str | Path, args: argparse.Namespace):
+        self.root = Path(root)
+        self.args = args
+        self.betas_path = Path(args.betas_path) if args.betas_path else None
+        self.images = list_input_images(self.root, prepared=False)
+        if not self.images:
+            raise FileNotFoundError(f"No raw images found in {self.root}")
+        has_keypoints = all(find_keypoints_path(path, args) is not None for path in self.images)
+        self.detector = None if has_keypoints else create_openpose_detector(args)
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, index: int):
+        import cv2
+
+        image_path = self.images[index]
+        full_image = cv2.imread(str(image_path))
+        if full_image is None:
+            raise ValueError(f"Could not read image: {image_path}")
+        height, width = full_image.shape[:2]
+        image_rgb = cv2.cvtColor(full_image, cv2.COLOR_BGR2RGB)
+
+        keypoints_path = find_keypoints_path(image_path, self.args)
+        if keypoints_path is not None:
+            keypoints = load_openpose_json(keypoints_path, thres=self.args.openpose_keypoint_thresh)
         else:
-            with open(self.betas_path, "rb") as f:
-                betas = pickle.load(f)
-                if isinstance(betas, dict):
-                    betas = betas.get("betas", betas)
-        return np.asarray(betas).reshape(-1)[:10].astype(np.float32)
+            people = self.detector(image_rgb, number_people_max=1)
+            keypoints = openpose_people_to_keypoints(people, threshold=self.args.openpose_keypoint_thresh)
+
+        cached = load_processed_cache(image_path, self.args)
+        if cached is None:
+            bbox = bbox_from_keypoints(
+                keypoints,
+                image_size=(height, width),
+                threshold=self.args.openpose_bbox_keypoint_thresh,
+                expansion=self.args.openpose_bbox_scale,
+            )
+            crop_image = crop_rgb_image(image_rgb, bbox)
+            save_processed_cache(image_path, self.args, crop_image, bbox)
+        else:
+            crop_image, _ = cached
+
+        image_np = np.asarray(crop_image).astype(np.float32) / 255.0
+        return {
+            "input_tensor": IMAGE_TRANSFORM(crop_image),
+            "img_tensor": torch.from_numpy(image_np).permute(2, 0, 1),
+            "cond_betas": torch.from_numpy(self._load_betas()).float(),
+            "file_name": image_path.stem,
+        }
+
+    def _load_betas(self) -> np.ndarray:
+        if self.betas_path is None:
+            return np.zeros(10, dtype=np.float32)
+        return _load_beta_vector(self.betas_path)
 
 
 def _build_dataset(args: argparse.Namespace):
     root = Path(args.test_data_dir)
     if (root / "cropped_new").is_dir():
         return PreparedCropDataset(root, betas_path=args.betas_path)
+    if _has_raw_images(root):
+        return RawImageDataset(root, args)
 
     from phd.data.test_dataset import TestDiffDataset
 
     return TestDiffDataset(args)
+
+
+def _has_raw_images(root: Path) -> bool:
+    if root.is_file():
+        return root.suffix.lower() in IMAGE_EXTS
+    if (root / "rgb").is_dir():
+        return any(
+            path.suffix.lower() in IMAGE_EXTS and not path.name.startswith(".")
+            for path in (root / "rgb").iterdir()
+        )
+    if root.is_dir():
+        return any(
+            path.suffix.lower() in IMAGE_EXTS and not path.name.startswith(".")
+            for path in root.iterdir()
+        )
+    return False
 
 
 def _expand_betas_for_samples(betas: torch.Tensor, num_images_per_prompt: int, num_samples: int) -> torch.Tensor:
@@ -332,13 +425,13 @@ def run(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run PointDiT inference on a prepared test dataset.")
+    parser = argparse.ArgumentParser(description="Run PointDiT inference on raw images.")
     parser.add_argument(
         "-t",
         "--test_data_dir",
         type=str,
-        default="demo_data/single",
-        help="Prepared crop folder or legacy test-data root consumed by phd.data.test_dataset.TestDiffDataset.",
+        default="demo_new/image",
+        help="Raw image, raw image folder, or video folder with rgb/.",
     )
     parser.add_argument("-o", "--output_path", type=str, default="./inference", help="Output root directory.")
     parser.add_argument("--exp_name", type=str, default="pointdit", help="Output subdirectory name.")
@@ -354,7 +447,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num_inference_steps", type=int, default=5, help="Number of denoising steps.")
     parser.add_argument("--num_workers", type=int, default=0, help="DataLoader worker count.")
     parser.add_argument("--max_images", type=int, default=None, help="Optional cap on processed examples.")
-    parser.add_argument("--betas_path", type=str, default=None, help="Optional default beta vector for prepared crops.")
+    parser.add_argument("--betas_path", type=str, default=None, help="Optional default 10-D beta vector.")
+    add_image_input_args(parser)
     parser.add_argument(
         "--random_shape_betas",
         "--random-shape-betas",

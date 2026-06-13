@@ -12,11 +12,13 @@ from fitting.helper.image_inputs import (
     load_image_fit_input,
 )
 from fitting.helper.init_params import PointDiTInitialization, initialize_from_pointdit
+from fitting.helper.shape_inputs import add_shape_input_args, ensure_shapify_shape
 from fitting.helper.visualization import add_render_args, create_renderer, render_overlay
 
 __all__ = [
     "ImageFitInput",
     "add_image_input_args",
+    "add_shape_input_args",
     "PointDiTInitialization",
     "add_fit_batch_args",
     "add_render_args",
@@ -27,6 +29,7 @@ __all__ = [
     "find_keypoints_path",
     "fit_batch",
     "initialize_from_pointdit",
+    "ensure_shapify_shape",
     "is_prepared_image_folder",
     "list_input_images",
     "load_image_fit_input",

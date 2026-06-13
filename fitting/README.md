@@ -5,8 +5,8 @@ keypoints. It owns the image/video demo fitters and the EMDB benchmark runner.
 
 ## Files
 
-- `fit_image.py`: fit a raw image, raw image folder, or prepared image folder.
-- `fit_video.py`: fit minimal or prepared in-the-wild video folders.
+- `fit_image.py`: fit a raw image or raw image folder.
+- `fit_video.py`: fit raw in-the-wild video folders.
 - `fit_emdb.py`: run one EMDB sequence from a packed H5 benchmark file.
 - `smooth_emdb.py`: optional post-fit temporal smoothing for benchmark outputs.
 - `config/eval/*.yaml`: supported EMDB fitting/evaluation profiles.
@@ -22,17 +22,20 @@ All fitting entry points accept `--config <yaml>`. YAML sections named `fit`,
 
 ## Input Layouts
 
-The demo loaders support minimal inputs and prepared caches. Minimal inputs are
-the public-facing format; prepared caches are useful when you have already
-cropped frames or run another initializer.
+The public demo path uses raw images/videos plus lightweight sidecar metadata.
+Generated crops, bboxes, and fallback SHAPify shapes are written under
+`processed/` by default; users do not need to prepare `bbox/`, `cropped_new/`,
+or `params/` folders.
 
-Single image:
+Image folder:
 
 ```text
-image.jpg
-image_keypoints.json        # optional OpenPose sidecar; otherwise detector runs
-image.json                  # optional sidecar camera metadata
-metadata.json               # optional folder-level camera metadata
+images/
++-- <id>.jpg
++-- <id>_keypoints.json       # optional OpenPose sidecar; otherwise detector runs
++-- <id>_subjects.json        # measurement/camera JSON for default SHAPify shape
++-- <id>.json                 # optional camera metadata sidecar
++-- metadata.json             # optional shared camera metadata
 ```
 
 Video:
@@ -43,32 +46,14 @@ video/
 |   +-- <frame>.jpg
 +-- openpose/               # optional; otherwise detector runs
 |   +-- <frame>_keypoints.json
-+-- metadata.json           # required camera intrinsics unless supplied elsewhere
-+-- neutral_shape.npy       # optional SHAPify betas; or pass --betas_path
++-- metadata.json           # camera intrinsics unless supplied elsewhere
++-- video_subjects.json     # measurements/camera for default first-frame SHAPify
 ```
 
-Fully prepared cache:
-
-```text
-prepared/
-+-- rgb/
-+-- cropped_new/
-+-- bbox/
-+-- openpose/
-+-- params/                 # optional CameraHMR init/metadata sidecars
-+-- neutral_shape.npy       # optional for video; or pass --betas_path
-```
-
-`params/` is not required for the demos. If it exists, `<id>.pkl` or
-`<id>.json` may contain CameraHMR initialization data, `betas`, and/or camera
-metadata. Camera intrinsics can instead come from sidecars, folder
-`metadata.json`, `--metadata_file`, or `--metadata_dir`.
-
-When video fitting does not receive `--betas_path` and the video folder does
-not contain `neutral_shape.npy`, `fit_video.py` runs SHAPify on the first frame.
-That fallback needs a subject-measurements JSON with `height`, `weight`,
-`gender`, and optionally camera fields. Pass it as `--shape_subjects`, or place
-`video_subjects.json` next to a direct video folder.
+Both fitters still accept an explicit `--betas_path`, but the default demo path
+runs SHAPify automatically. Image fitting uses each image's subject JSON. Video
+fitting runs SHAPify on the first frame and then loads that shape for the whole
+sequence.
 
 ## Camera Metadata
 
@@ -87,21 +72,19 @@ Supported metadata files are `.json` or `.pkl` dictionaries containing one of:
 {"focal": [1436.0, 1436.0], "camera_center": [720.0, 960.0]}
 ```
 
-For video metadata, a shared `metadata.json` may contain global `K`/`focal` or
+For video metadata, `metadata.json` may contain sequence-level `K`/`focal` or
 per-frame entries under `frames`, `images`, `per_frame`, or
 `perFrameIntrinsicCoeffs`.
 
 ## Single Images
 
-Fit a raw image, a folder of raw images, or a prepared folder:
+Fit a raw image or a folder of raw images:
 
 ```bash
 bash scripts/run_fitting.sh image \
     path/to/image_or_folder \
     demo_outputs/fitting \
-    demo_outputs/shapify/neutral_shape<subject>.npy \
-    checkpoints/pointdit \
-    --metadata_file path/to/camera_metadata.json
+    checkpoints/pointdit
 ```
 
 Equivalent Python command:
@@ -111,30 +94,26 @@ python -m fitting.fit_image \
     --test_data_dir path/to/image_or_folder \
     --output_path demo_outputs/fitting \
     --exp_name image_fit \
-    --pretrained_model_name_or_path checkpoints/pointdit \
-    --betas_path demo_outputs/shapify/neutral_shape<subject>.npy \
-    --metadata_file path/to/camera_metadata.json
+    --pretrained_model_name_or_path checkpoints/pointdit
 ```
 
 `--test_data_dir` can be:
 
 - a single raw image;
-- a folder of raw images;
-- a minimal folder with `rgb/` and optional `openpose/`;
-- a prepared folder with `rgb/`, `cropped_new/`, `bbox/`, and `openpose/`.
+- a folder of raw images.
 
 For raw images, `fit_image.py` runs the bundled PyTorch OpenPose-135 detector,
 estimates a bbox, and builds the crop in memory. If `<image>_keypoints.json` is
 next to the image, or `--keypoints_dir` points to matching OpenPose JSONs, the
-detector is skipped. Betas default to zero unless the metadata contains
-`betas` or `--betas_path` is provided.
+detector is skipped. Unless `--betas_path` is provided, fitting runs SHAPify
+from the matching `<image>_subjects.json` and uses that personalized shape.
 
-For raw or minimal inputs, bbox/crop preparation follows the public demo
-preprocessing convention: BODY_25 keypoints above `--openpose_bbox_keypoint_thresh`
-define a square bbox, `--openpose_bbox_scale` expands it, and the same affine
-crop transform as the BEDLAM raw loader produces the 256x256 crop. The defaults
-(`0.5` confidence and `1.3` scale) match `extract_bbox_hwb.py` for OpenPose
-demo data. BEDLAM itself uses annotation-provided center/scale and defaults to
+For raw inputs, bbox/crop preparation follows the public demo preprocessing
+convention: BODY_25 keypoints above `--openpose_bbox_keypoint_thresh` define a
+square bbox, `--openpose_bbox_scale` expands it, and the same affine crop
+transform as the BEDLAM raw loader produces the 256x256 crop. The defaults
+(`0.5` confidence and `1.3` scale) match `extract_bbox_hwb.py` for OpenPose demo
+data. BEDLAM itself uses annotation-provided center/scale and defaults to
 non-rectified crops (`rectify_images: False`).
 
 Outputs are written to `<output_path>/<exp_name>/` when `--output_path` is set,
@@ -153,7 +132,7 @@ video/
 +-- rgb/
 +-- openpose/                   # optional
 +-- metadata.json
-+-- neutral_shape.npy           # optional
++-- video_subjects.json
 ```
 
 or a dataset root:
@@ -165,6 +144,7 @@ video_root/
         +-- rgb/
         +-- openpose/           # optional
         +-- metadata.json
+        +-- video_subjects.json # or pass --shape_subjects
 ```
 
 Run fitting:
@@ -173,8 +153,7 @@ Run fitting:
 bash scripts/run_fitting.sh video \
     path/to/video \
     video_fit \
-    checkpoints/pointdit \
-    --betas_path demo_outputs/shapify/neutral_shape<subject>.npy
+    checkpoints/pointdit
 ```
 
 Or call Python directly:
@@ -189,9 +168,10 @@ python -m fitting.fit_video \
 
 Results are written under each sequence folder as `<sequence>/<exp_name>/`
 unless `--output_path` is set. Use `--subjects` and `--sequences` only for the
-nested dataset-root layout. If `--betas_path` is omitted, the script looks for
-`neutral_shape.npy` inside each video folder, then runs first-frame SHAPify from
-`--shape_subjects` or a nearby `video_subjects.json`.
+nested dataset-root layout. If `--betas_path` is omitted, the script runs
+first-frame SHAPify from `--shape_subjects` or a nearby `video_subjects.json`.
+That generated beta vector is cached under `processed/shapify/` and reused for
+all frames in the sequence.
 
 Use `--render` to write overlays, then create a video from those frames:
 
@@ -215,11 +195,21 @@ For a video, extract frames into `video/rgb/`. Put OpenPose JSONs in
 single-image and video scaffold with no `bbox/`, `cropped_new/`, or `params/`
 requirement.
 
-Prepared folders produced by scripts such as `extract_bbox_hwb.py` are also
-accepted. In that case `cropped_new/` and `bbox/<frame>.json` are read instead
-of recomputing crops. The optional `cam_R` stored in those bbox files is the
-pure-rotation rectification used by legacy rectified-crop experiments; the
-default BEDLAM and demo paths use original, non-rectified crops.
+Both image and video fitting cache generated crops and bboxes by default:
+
+```text
+processed/
++-- crops/<id>.png
++-- bbox/<id>.json
++-- shapify/neutral_shape<image>.npy
+```
+
+Use `--processed_dir` to move the crop/bbox cache,
+`--overwrite_processed_cache` to refresh it, or `--no_processed_cache` to keep
+all generated crop/bbox data in memory for the current run. The demo path does
+not use CameraHMR `params/` sidecars. The optional `cam_R` in older bbox files
+was only for rectified-crop experiments; the default BEDLAM and demo paths use
+original, non-rectified crops.
 
 ## EMDB Benchmark
 
@@ -333,13 +323,15 @@ avoid auto-download.
 | Argument | Script | Meaning |
 |---|---|---|
 | `--test_data_dir` | `fit_image.py`, `fit_video.py` | Image path/folder, direct video folder, or nested video root. |
-| `--betas_path` | `fit_image.py`, `fit_video.py` | 10-D SHAPify beta vector; optional but recommended for demos. |
-| `--shape_subjects` | `fit_video.py` | Measurement JSON for first-frame SHAPify fallback when video betas are missing. |
-| `--shape_config`, `--shape_output_dir` | `fit_video.py` | SHAPify config/output location for the first-frame fallback. |
+| `--betas_path` | `fit_image.py`, `fit_video.py` | Explicit 10-D SHAPify beta vector. If omitted, demos run SHAPify from subject JSON. |
+| `--shape_subjects` | `fit_image.py`, `fit_video.py` | Measurement JSON for the default SHAPify shape fallback. |
+| `--shape_config`, `--shape_output_dir` | `fit_image.py`, `fit_video.py` | SHAPify config/output location for generated fallback shapes. |
 | `--metadata_file` | `fit_image.py`, `fit_video.py` | Shared metadata `.json`/`.pkl` containing `focal` or `K`. |
 | `--metadata_dir` | `fit_image.py`, `fit_video.py` | Directory with per-image/per-frame metadata files. |
 | `--keypoints_dir` | `fit_image.py`, `fit_video.py` | Directory with OpenPose `<id>_keypoints.json` files. |
-| `--openpose_bbox_scale`, `--openpose_bbox_keypoint_thresh` | `fit_image.py`, `fit_video.py` | Raw/minimal input bbox expansion and BODY_25 confidence threshold. |
+| `--processed_dir`, `--no_processed_cache`, `--overwrite_processed_cache` | `fit_image.py`, `fit_video.py` | Control the generated crop/bbox cache. |
+| `--openpose_bbox_scale`, `--openpose_bbox_keypoint_thresh` | `fit_image.py`, `fit_video.py` | Raw input bbox expansion and BODY_25 confidence threshold. |
+| `--batch_size`, `--smooth_intra`, `--smooth_causal`, `--w_jitter` | `fit_video.py`, `fit_emdb.py` | Batched fitting and EMDB-style temporal smoothing controls. |
 | `--pretrained_model_name_or_path` | all fitters | PointDiT checkpoint directory. |
 | `--config` | all fitters | YAML profile for fit, pipeline, loss, and optimizer defaults. |
 | `--n_sample` | all fitters | PointDiT samples per input frame. |

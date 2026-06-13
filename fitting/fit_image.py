@@ -1,9 +1,11 @@
 import argparse
+import copy
 import os
 import pickle
 from pathlib import Path
 import trimesh
 
+import cv2
 import torch
 from tqdm import tqdm
 import smplx
@@ -19,16 +21,63 @@ from fitting.helper.image_inputs import (
     add_image_input_args,
     create_openpose_detector,
     find_keypoints_path,
-    is_prepared_image_folder,
     list_input_images,
     load_image_fit_input,
+    load_fitting_metadata,
 )
 from fitting.helper.init_params import initialize_from_pointdit
+from fitting.helper.shape_inputs import add_shape_input_args, ensure_shapify_shape, load_shape_subject
 from fitting.helper.visualization import add_render_args, create_renderer, render_overlay
 
 os.environ.setdefault("DATA_ROOT", smplfitter_data_root())
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+
+def _input_root(input_path):
+    input_path = Path(input_path)
+    return input_path if input_path.is_dir() else input_path.parent
+
+
+def _cache_root(args, input_path):
+    if args.processed_dir:
+        return Path(args.processed_dir)
+    return _input_root(input_path) / "processed"
+
+
+def _image_args_with_shape(args, image_path, input_root, cache_root):
+    image_args = copy.copy(args)
+    if image_args.betas_path:
+        return image_args
+
+    subject, _ = load_shape_subject(args, input_root, image_path, video=False)
+    if subject is not None and subject.get("camera") is not None:
+        image_args.metadata_override = {"camera": subject["camera"]}
+
+    full_image = cv2.imread(str(image_path))
+    if full_image is None:
+        raise ValueError(f"Could not read image: {image_path}")
+    height, width = full_image.shape[:2]
+    K, _ = load_fitting_metadata(image_path, image_args, width, height, load_betas=False)
+    keypoints_path = find_keypoints_path(image_path, image_args)
+    if keypoints_path is None:
+        raise ValueError(
+            f"Cannot run SHAPify shape fallback for {image_path}: missing OpenPose sidecar keypoints."
+        )
+
+    image_args.betas_path = str(ensure_shapify_shape(
+        image_args,
+        root=input_root,
+        image_path=image_path,
+        keypoints_path=keypoints_path,
+        K=K,
+        width=width,
+        height=height,
+        video=False,
+    ))
+    image_args.metadata_override = {"K": K.tolist()}
+    image_args.processed_dir = str(cache_root)
+    return image_args
 
 
 
@@ -52,23 +101,25 @@ def main(args):
 
 
     folder_path = Path(args.test_data_dir)
-    prepared = is_prepared_image_folder(folder_path)
-    image_list = list_input_images(folder_path, prepared=prepared)
+    input_root = _input_root(folder_path)
+    image_list = list_input_images(folder_path, prepared=False)
     has_all_keypoints = all(find_keypoints_path(path, args) is not None for path in image_list)
-    detector = None if prepared or has_all_keypoints else create_openpose_detector(args)
+    detector = None if has_all_keypoints else create_openpose_detector(args)
     if args.output_path:
         save_root = Path(args.output_path)
     else:
         save_root = folder_path if folder_path.is_dir() else folder_path.parent
     save_path = save_root / args.exp_name
     save_path.mkdir(parents=True, exist_ok=True)
+    cache_root = _cache_root(args, folder_path)
 
     for image_path in tqdm(image_list):
+        image_args = _image_args_with_shape(args, image_path, input_root, cache_root)
         sample = load_image_fit_input(
             image_path,
-            args,
-            prepared_root=folder_path if prepared else None,
+            image_args,
             detector=detector,
+            cache_root=cache_root,
         )
 
         file_name = sample.file_name
@@ -155,10 +206,9 @@ if __name__ == "__main__":
         "-t",
         "--test_data_dir",
         type=str,
-        default="demo_data",
+        default="demo_new/image",
         help=(
-            "Path to a raw image, a folder of raw images, or a prepared folder with "
-            "rgb/, cropped_new/, bbox/, and openpose/ subdirectories."
+            "Path to a raw image or a folder of raw images."
         ),
     )
     parser.add_argument(
@@ -238,6 +288,7 @@ if __name__ == "__main__":
     )
     add_render_args(parser)
     add_image_input_args(parser)
+    add_shape_input_args(parser)
 
     add_fit_batch_args(parser, defaults={
         "n_sample": 1,

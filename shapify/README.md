@@ -20,8 +20,8 @@ per-image focal length, and height/weight measurements.
 ```bash
 bash scripts/run_shapify.sh \
     shapify/configs/measured.yaml \
-    demo_data/subjects_example.json \
-    demo_data \
+    demo_new/image/1_subjects.json \
+    demo_new/image \
     demo_outputs/shapify
 ```
 
@@ -32,7 +32,7 @@ The subject JSON is a list of entries:
   {
     "image": "subject0.jpg",
     "pose": "subject0_keypoints.json",
-    "focal": 1436.0,
+    "camera": {"focal": 1436.0},
     "height": 1.77,
     "weight": 60,
     "gender": "male"
@@ -41,10 +41,10 @@ The subject JSON is a list of entries:
 ```
 
 `image` and `pose` are resolved relative to `--input_dir`. `height` and
-`weight` are the person measurements. `focal` is required per subject; image
+`weight` are the person measurements. Camera focal length is required per
+subject/image, either as top-level `focal` or grouped under `camera`. Image
 dimensions are inferred from the image unless you set `image_width` and
-`image_height`, or group intrinsics as
-`"camera": {"focal": 1436.0, "width": 1440, "height": 1920}`. The script writes
+`image_height`, or include them in `camera`. The script writes
 `neutral_shape<image>.npy`, `pred_shape<image>.obj`, `opt_mesh_<image>.obj`,
 and an overlay image to `--output_dir`.
 
@@ -77,13 +77,10 @@ The video subject JSON accepts either explicit frames or a subject directory:
 ]
 ```
 
-When `subject_dir` is used, two layouts are supported:
-
-- Prepared: `rgb/`, `cropped_new/`, `bbox/`, and `openpose/` subdirectories.
-- Minimal: `rgb/` frames plus `openpose/` keypoints. Crops and bboxes are built
-  in memory.
-- Raw: image files directly under the subject directory; the bundled
-  OpenPose-135 detector creates keypoints, bbox, and crops in memory.
+When `subject_dir` is used, the public layout is `rgb/` frames plus optional
+`openpose/` keypoints. Crops and bboxes are generated from the full-resolution
+frames; if keypoints are missing, the bundled OpenPose-135 detector creates
+them in memory.
 
 For minimal/raw video inputs, bbox creation follows the demo preprocessing:
 BODY_25 keypoints above `openpose.bbox_keypoint_thresh` are enclosed and
@@ -116,7 +113,7 @@ For PointDiT-only samples:
 
 ```bash
 bash scripts/run_pointdit_inference.sh \
-    demo_data/single \
+    demo_new/image \
     demo_outputs/pointdit \
     shaped_samples \
     checkpoints/pointdit \
@@ -129,11 +126,12 @@ For single-image fitting:
 bash scripts/run_fitting.sh image \
     path/to/image_or_folder \
     demo_outputs/fitting \
-    demo_outputs/shapify/neutral_shape<subject>.npy
+    checkpoints/pointdit \
+    --betas_path demo_outputs/shapify/neutral_shape<subject>.npy
 ```
 
-For video fitting, pass the beta file with `--betas_path`, or place it as
-`neutral_shape.npy` inside each video folder.
+For video fitting, omit `--betas_path` to use the default first-frame SHAPify
+fallback, or pass a beta file explicitly with `--betas_path`.
 
 PointDiT training/inference code lives in `phd/`; body fitting and EMDB
 evaluation live in `fitting/`.

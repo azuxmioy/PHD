@@ -52,8 +52,8 @@ Run single-image shape fitting:
 ```bash
 bash scripts/run_shapify.sh \
     shapify/configs/measured.yaml \
-    demo_data/subjects_example.json \
-    demo_data \
+    demo_new/image/1_subjects.json \
+    demo_new/image \
     demo_outputs/shapify
 ```
 
@@ -62,28 +62,28 @@ The output shape is a 10-D beta vector such as
 
 ### 2. PointDiT Pose Samples From Images
 
-Sample pose/point hypotheses from prepared crops with the default shape:
+Sample pose/point hypotheses from the raw image list:
 
 ```bash
-bash scripts/run_pointdit_inference.sh demo_data/single demo_outputs/pointdit
+bash scripts/run_pointdit_inference.sh demo_new/image demo_outputs/pointdit
 ```
 
 Use a SHAPify shape from step 1:
 
 ```bash
 bash scripts/run_pointdit_inference.sh \
-    demo_data/single \
+    demo_new/image \
     demo_outputs/pointdit \
     shaped_samples \
     checkpoints/pointdit \
-    --betas_path demo_outputs/shapify/neutral_shapesubject10.jpg.npy
+    --betas_path demo_outputs/shapify/neutral_shape1.jpg.npy
 ```
 
 Or sample each hypothesis with a random SMPL shape:
 
 ```bash
 bash scripts/run_pointdit_inference.sh \
-    demo_data/single \
+    demo_new/image \
     demo_outputs/pointdit \
     random_shape_samples \
     checkpoints/pointdit \
@@ -92,46 +92,42 @@ bash scripts/run_pointdit_inference.sh \
 
 ### 3. Fit Images or Videos
 
-Fit a raw image or image folder using the SHAPify shape. Camera metadata is
-paired with the image through a sidecar file, folder `metadata.json`, or
-`--metadata_file`/`--metadata_dir`.
+Fit a raw image folder. By default, fitting runs SHAPify from each image's
+subject JSON and uses that personalized shape:
 
 ```bash
 bash scripts/run_fitting.sh image \
-    path/to/image_or_folder \
+    demo_new/image \
     demo_outputs/fitting \
-    demo_outputs/shapify/neutral_shape<subject>.npy \
-    checkpoints/pointdit \
-    --metadata_file path/to/camera_metadata.json
+    checkpoints/pointdit
 ```
 
 Fit a video folder with `rgb/` frames, optional `openpose/` keypoints, and
-camera `metadata.json`. If no beta file is provided, the video demo runs
-SHAPify on the first frame using a subject-measurements JSON:
+camera `metadata.json`. By default, fitting runs SHAPify on the first frame and
+loads that shape for every frame:
 
 ```bash
 bash scripts/run_fitting.sh video \
-    path/to/video_folder \
+    demo_new/video \
     video_fit \
-    checkpoints/pointdit \
-    --shape_subjects path/to/video_subjects.json
+    checkpoints/pointdit
 ```
 
 ## Important Arguments
 
 | Launcher | Argument | What to change |
 |---|---|---|
-| `scripts/run_shapify.sh` | positional 2: `subjects_json` | Subject list with image, keypoint JSON, focal, height, weight, and gender. |
+| `scripts/run_shapify.sh` | positional 2: `subjects_json` | Subject list with image, keypoint JSON, per-subject camera focal, height, weight, and gender. |
 | `scripts/run_shapify.sh` | positional 3/4: `input_dir`, `output_dir` | Input image/keypoint root and output directory for beta vectors. |
-| `scripts/run_pointdit_inference.sh` | positional 1: `test_data_dir` | Prepared crop folder for PointDiT inference. |
+| `scripts/run_pointdit_inference.sh` | positional 1: `test_data_dir` | Raw image, raw image folder, or video folder with `rgb/`. |
 | `scripts/run_pointdit_inference.sh` | `--betas_path` | Use a specific 10-D shape vector, usually from SHAPify. |
 | `scripts/run_pointdit_inference.sh` | `--random_shape_betas` | Sample one random shape per generated hypothesis. |
-| `scripts/run_fitting.sh image` | positional 2: `input_path` | Raw image, raw image folder, or prepared image folder. |
-| `scripts/run_fitting.sh image` | positional 4: `betas_path` | Shape vector from SHAPify; pass `-` to use zero betas. |
+| `scripts/run_fitting.sh image` | positional 2: `input_path` | Raw image or raw image folder. |
 | `scripts/run_fitting.sh video` | positional 2: `video_root` | Direct video folder with `rgb/`, or a root with subject/sequence folders. |
-| `scripts/run_fitting.sh video` | `--betas_path`, `--shape_subjects` | Use an existing shape, or run first-frame SHAPify from subject measurements. |
+| `scripts/run_fitting.sh` | `--shape_subjects` | Override the subject-measurements JSON used by the default SHAPify shape fallback. |
 | `scripts/run_fitting.sh` | `--metadata_file`, `--metadata_dir` | Camera metadata containing `focal` or `K`; use per image/video, not as a global launch setting. |
-| `scripts/run_fitting.sh` | `--keypoints_dir` | Optional OpenPose JSON directory when keypoints are not next to the images. |
+| `scripts/run_fitting.sh` | `--processed_dir`, `--no_processed_cache`, `--overwrite_processed_cache` | Location/control for the default crop and bbox cache. |
+| `scripts/run_fitting.sh video` | `--batch_size`, smoothing args | Chunk size and EMDB-style temporal smoothing controls. |
 | all launchers | final extra args | Passed through to the underlying Python CLI. Use `--help` on the Python module for the full list. |
 
 ## Detailed Docs

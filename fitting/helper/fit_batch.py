@@ -62,6 +62,7 @@ def add_fit_batch_args(parser, defaults=None):
         "n_sample": 4,
         "n_iter": 100,
         "n_iter_first": None,
+        "per_frame": False,
         "w_kp": 1.0,
         "w_smooth": 0.0,
         "w_point": 100.0,
@@ -96,6 +97,8 @@ def add_fit_batch_args(parser, defaults=None):
         help="Override the fit optimizer iteration count.")
     add("--n_iter_first", type=int, default=arg_defaults["n_iter_first"],
         help="Optional optimizer iteration count for the first frame when prev_params is absent.")
+    add("--per_frame", action="store_true", default=arg_defaults["per_frame"],
+        help="Use legacy B=1 fitting with previous-frame chaining instead of batched fitting.")
     add("--w_kp", type=float, default=arg_defaults["w_kp"],
         help="Weight for the 2D keypoint reprojection term.")
     add("--w_smooth", type=float, default=arg_defaults["w_smooth"],
@@ -182,6 +185,17 @@ def _reduce_loss(loss, bbox_scale, bbox_scale_per_frame, n_sample, per_frame_los
     return (loss / bbox_scale_per_frame).mean()
 
 
+def _expand_intrinsics(K, batch_size, n_sample, device, dtype):
+    K_t = torch.as_tensor(K, device=device, dtype=dtype)
+    if K_t.ndim == 2:
+        K_t = K_t.unsqueeze(0).expand(batch_size, -1, -1)
+    elif K_t.ndim != 3:
+        raise ValueError(f"Expected K with shape (3,3) or (B,3,3), got {tuple(K_t.shape)}")
+    if K_t.shape[0] != batch_size:
+        raise ValueError(f"Expected {batch_size} intrinsics, got {K_t.shape[0]}")
+    return K_t.repeat_interleave(n_sample, dim=0)
+
+
 def fit_batch(
     SMPL_neutral,
     fitter,
@@ -252,6 +266,7 @@ def fit_batch(
         gt_joints_2d = kp_2d_t.repeat_interleave(n_sample, dim=0)
 
     bbox_scale, bbox_scale_per_frame = _get_bbox_scale(bbox, opt_cam.device, n_sample)
+    K_batch = _expand_intrinsics(K, batch_size, n_sample, opt_cam.device, opt_cam.dtype)
 
     point_update_interval = max(1, args.point_update_interval)
 
@@ -289,8 +304,8 @@ def fit_batch(
             joints_3d,
             translation=torch.zeros((batch_size * n_sample, 3), device=joints_3d.device),
             rotation=torch.eye(3, device=joints_3d.device).unsqueeze(0).expand(batch_size * n_sample, -1, -1),
-            focal_length=torch.tensor([K[0, 0], K[1, 1]], device=joints_3d.device).unsqueeze(0).expand(batch_size * n_sample, -1),
-            camera_center=torch.tensor([K[0, 2], K[1, 2]], device=joints_3d.device).unsqueeze(0).expand(batch_size * n_sample, -1),
+            focal_length=torch.stack([K_batch[:, 0, 0], K_batch[:, 1, 1]], dim=-1),
+            camera_center=torch.stack([K_batch[:, 0, 2], K_batch[:, 1, 2]], dim=-1),
         )
 
         if keypoint_type == "vit17":

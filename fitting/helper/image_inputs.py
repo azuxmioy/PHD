@@ -29,42 +29,68 @@ class ImageFitInput:
 
 
 def add_image_input_args(parser):
-    parser.add_argument(
+    existing = {option for action in parser._actions for option in action.option_strings}
+
+    def add(*names, **kwargs):
+        if any(name in existing for name in names):
+            return
+        parser.add_argument(*names, **kwargs)
+        existing.update(names)
+
+    add(
         "--betas_path",
         type=str,
         default=None,
         help="Optional .npy/.pkl file containing a 10-D SMPL beta vector for raw images.",
     )
-    parser.add_argument(
+    add(
         "--metadata_dir",
         type=str,
         default=None,
         help="Optional directory with per-image <id>.pkl/.json metadata containing focal or K.",
     )
-    parser.add_argument(
+    add(
         "--metadata_file",
         type=str,
         default=None,
         help="Optional shared .json/.pkl metadata file containing focal or K for an image/video folder.",
     )
-    parser.add_argument(
+    add(
         "--keypoints_dir",
         type=str,
         default=None,
         help="Optional directory with OpenPose <id>_keypoints.json files for raw image inputs.",
     )
-    parser.add_argument("--openpose_device", default="auto", choices=["auto", "cuda", "cpu"])
-    parser.add_argument("--openpose_weights_dir", type=str, default=None,
-                        help="Optional directory with OpenPose-135 .pth weights.")
-    parser.add_argument("--openpose_no_hand", action="store_true", help="Skip OpenPose hand network.")
-    parser.add_argument("--openpose_with_face", action="store_true",
-                        help="Run OpenPose face network. Off by default because fitting does not use face keypoints.")
-    parser.add_argument("--openpose_bbox_scale", type=float, default=1.3,
-                        help="BBox expansion factor around detected body keypoints.")
-    parser.add_argument("--openpose_bbox_keypoint_thresh", type=float, default=0.5,
-                        help="Confidence threshold used only for bbox estimation from OpenPose BODY_25 keypoints.")
-    parser.add_argument("--openpose_keypoint_thresh", type=float, default=0.1,
-                        help="Confidence threshold for OpenPose keypoints used by fitting.")
+    add(
+        "--processed_dir",
+        type=str,
+        default=None,
+        help="Optional directory for cached processed crops and bbox JSON files.",
+    )
+    add(
+        "--no_processed_cache",
+        dest="use_processed_cache",
+        action="store_false",
+        default=True,
+        help="Disable reading/writing processed crop and bbox cache files.",
+    )
+    add(
+        "--overwrite_processed_cache",
+        action="store_true",
+        help="Recompute crop/bbox cache files even when they already exist.",
+    )
+    add("--openpose_device", default="auto", choices=["auto", "cuda", "cpu"])
+    add("--openpose_weights_dir", type=str, default=None,
+        help="Optional directory with OpenPose-135 .pth weights.")
+    add("--openpose_no_hand", action="store_true", help="Skip OpenPose hand network.")
+    add("--openpose_with_face", action="store_true",
+        help="Run OpenPose face network. Off by default because fitting does not use face keypoints.")
+    add("--openpose_bbox_scale", type=float, default=1.3,
+        help="BBox expansion factor around detected body keypoints.")
+    add("--openpose_bbox_keypoint_thresh", type=float, default=0.5,
+        help="Confidence threshold used only for bbox estimation from OpenPose BODY_25 keypoints.")
+    add("--openpose_keypoint_thresh", type=float, default=0.1,
+        help="Confidence threshold for OpenPose keypoints used by fitting.")
 
 
 def is_prepared_image_folder(root):
@@ -106,10 +132,10 @@ def create_openpose_detector(args):
     )
 
 
-def load_image_fit_input(image_path, args, prepared_root=None, detector=None):
+def load_image_fit_input(image_path, args, prepared_root=None, detector=None, cache_root=None):
     if prepared_root is not None:
         return _load_prepared_image_input(Path(prepared_root), Path(image_path), args)
-    return _load_raw_image_input(Path(image_path), args, detector)
+    return _load_raw_image_input(Path(image_path), args, detector, cache_root=cache_root)
 
 
 def _load_prepared_image_input(root, image_path, args):
@@ -135,7 +161,7 @@ def _load_prepared_image_input(root, image_path, args):
     return ImageFitInput(file_name, full_image, crop_image, keypoints, bbox, K, betas, cam_R_inv)
 
 
-def _load_raw_image_input(image_path, args, detector):
+def _load_raw_image_input(image_path, args, detector, cache_root=None):
     full_image = cv2.imread(str(image_path))
     if full_image is None:
         raise ValueError(f"Could not read image: {image_path}")
@@ -153,17 +179,66 @@ def _load_raw_image_input(image_path, args, detector):
             )
         people = detector(full_rgb, number_people_max=1)
         keypoints_np = openpose_people_to_keypoints(people, threshold=args.openpose_keypoint_thresh)
-    bbox = bbox_from_keypoints(
-        keypoints_np,
-        image_size=(height, width),
-        threshold=args.openpose_bbox_keypoint_thresh,
-        expansion=args.openpose_bbox_scale,
-    )
-    crop_image = crop_rgb_image(full_rgb, bbox)
+    cached = load_processed_cache(image_path, args, cache_root=cache_root)
+    if cached is None:
+        bbox = bbox_from_keypoints(
+            keypoints_np,
+            image_size=(height, width),
+            threshold=args.openpose_bbox_keypoint_thresh,
+            expansion=args.openpose_bbox_scale,
+        )
+        crop_image = crop_rgb_image(full_rgb, bbox)
+        save_processed_cache(image_path, args, crop_image, bbox, cache_root=cache_root)
+    else:
+        crop_image, bbox = cached
 
     K, betas = load_fitting_metadata(image_path, args, width, height)
 
     return ImageFitInput(image_path.stem, full_image, crop_image, torch.tensor(keypoints_np), bbox, K, betas)
+
+
+def processed_cache_root(image_path, args, cache_root=None) -> Optional[Path]:
+    if not getattr(args, "use_processed_cache", True):
+        return None
+    if getattr(args, "processed_dir", None):
+        return Path(args.processed_dir)
+    if cache_root is not None:
+        return Path(cache_root)
+    image_path = Path(image_path)
+    if image_path.parent.name == "rgb":
+        return image_path.parent.parent / "processed"
+    return image_path.parent / "processed"
+
+
+def processed_cache_paths(image_path, args, cache_root=None):
+    root = processed_cache_root(image_path, args, cache_root=cache_root)
+    if root is None:
+        return None, None
+    stem = Path(image_path).stem
+    return root / "crops" / f"{stem}.png", root / "bbox" / f"{stem}.json"
+
+
+def load_processed_cache(image_path, args, cache_root=None):
+    if getattr(args, "overwrite_processed_cache", False):
+        return None
+    crop_path, bbox_path = processed_cache_paths(image_path, args, cache_root=cache_root)
+    if crop_path is None or not crop_path.exists() or not bbox_path.exists():
+        return None
+    with open(bbox_path, "r") as f:
+        bbox_dict = json.load(f)
+    bbox = bbox_dict["bbox"] if isinstance(bbox_dict, dict) else bbox_dict
+    return Image.open(crop_path).convert("RGB"), bbox
+
+
+def save_processed_cache(image_path, args, crop_image, bbox, cache_root=None):
+    crop_path, bbox_path = processed_cache_paths(image_path, args, cache_root=cache_root)
+    if crop_path is None:
+        return
+    crop_path.parent.mkdir(parents=True, exist_ok=True)
+    bbox_path.parent.mkdir(parents=True, exist_ok=True)
+    crop_image.save(crop_path)
+    with open(bbox_path, "w") as f:
+        json.dump({"bbox": [float(x) for x in bbox]}, f, indent=4)
 
 
 def find_keypoints_path(image_path, args, prepared_root=None) -> Optional[Path]:
@@ -264,9 +339,12 @@ def crop_transform(center, scale, res, rot=0):
 
 
 def load_fitting_metadata(image_path, args, width, height, prepared_root=None, load_betas=True):
-    metadata_path = find_metadata_path(image_path, args, prepared_root=prepared_root)
+    metadata_override = getattr(args, "metadata_override", None)
+    metadata_path = None if metadata_override is not None else find_metadata_path(image_path, args, prepared_root=prepared_root)
     label = Path(image_path).name
-    if metadata_path is None:
+    if metadata_override is not None:
+        metadata = dict(metadata_override)
+    elif metadata_path is None:
         fallback_focal = getattr(args, "focal_length", None)
         if fallback_focal is None:
             raise ValueError(
