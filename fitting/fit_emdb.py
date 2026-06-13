@@ -15,7 +15,7 @@ share one PointDiT forward + one optimizer.
 
 Usage:
     python -m fitting.fit_emdb \\
-        --h5 /data/hohs2/datasets/emdb/emdb_eval.h5 \\
+        --h5 data/emdb_eval.h5 \\
         --sequence P1_14_outdoor_climb \\
         --pretrained_model_name_or_path checkpoints/pointdit \\
         --batch_size 8 \\

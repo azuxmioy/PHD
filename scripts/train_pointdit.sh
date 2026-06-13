@@ -2,8 +2,8 @@
 # Distributed training launcher for PointDiT.
 #
 # Prerequisites: pip install accelerate; accelerate config (one-time).
-# Set SMPL_MODEL_PATH to your SMPL neutral folder and VITPOSE_CHECKPOINT to
-# the ViTPose-H weights. BEDLAM data root is set in phd/config/train.yaml.
+# BEDLAM paths and output paths can be set in phd/config/train.yaml or passed
+# as CLI overrides, for example --train_data_dir data/bedlam --output_dir runs.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

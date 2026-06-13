@@ -8,7 +8,7 @@ Prereqs:
 Usage:
     python -m tools.openpose135._upload_to_hf \\
         --pth-dir ./openpose135_pth \\
-        --repo hohs/openpose135-weights
+        --repo <hf-user-or-org>/openpose135-weights
 """
 from __future__ import annotations
 
@@ -47,9 +47,9 @@ needed to reproduce the OpenPose-135 keypoint layout without a Caffe runtime or 
 
 ## Usage
 
-These are intended to be loaded by [`tools/openpose135/`](https://github.com/hohs) — the
-self-contained PyTorch OpenPose-135 detector vendored into the PHD codebase. The detector
-auto-downloads from this repo on first use:
+These are intended to be loaded by the `tools/openpose135/` detector vendored
+into the PHD codebase. The detector can auto-download from this repo on first
+use:
 
 ```python
 from tools.openpose135 import OpenPose135Detector
@@ -85,7 +85,7 @@ Redistribution here is non-commercial; downstream use inherits the same restrict
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pth-dir", required=True, type=Path, help="Directory with the three .pth files.")
-    parser.add_argument("--repo", required=True, help="Target repo, e.g. hohs/openpose135-weights")
+    parser.add_argument("--repo", required=True, help="Target repo, e.g. <hf-user-or-org>/openpose135-weights")
     parser.add_argument("--private", action="store_true", help="Create the repo as private.")
     args = parser.parse_args()
 

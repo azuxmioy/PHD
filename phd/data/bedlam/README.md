@@ -6,8 +6,8 @@ preprocessing pass and applies crop/rotation augmentation before the final crop.
 
 ## Input Layout
 
-Set `BEDLAM_ROOT` to the directory that contains the BEDLAM SMPL annotations
-and extracted frames:
+Use a BEDLAM root directory that contains the SMPL annotations and extracted
+frames:
 
 ```text
 BEDLAM_ROOT/
@@ -58,7 +58,7 @@ loaded during training.
 The official Hugging Face BEDLAM PNG chunks are large. For a lighter setup,
 download the official MP4 tar from Hugging Face and combine it with the SMPL
 annotation zip from the official BEDLAM project page. See
-`phd/data/bedlam/MP4_DATA_PREP.md` for the tested commands, debug overlays,
+`phd/data/bedlam/MP4_DATA_PREP.md` for the MP4 extraction workflow,
 raw-loader smoke test, and H5 build test.
 
 ## Optional: H5 Cache
@@ -95,19 +95,3 @@ dataset:
 For H5 data, `rectify_images: True` reads `warp_crop`, `warp_kps`, and
 `orient_rect` when those keys exist. If a shard does not contain those legacy
 rectified fields, the loader falls back to the original crop fields.
-
-## Debug Rectification
-
-`create_rectified_crops.py` can write visual checks for the rectification
-without building H5 shards:
-
-```bash
-python3 -m phd.data.bedlam.create_rectified_crops \
-    --bedlam_root /path/to/BEDLAM_ROOT \
-    --debug \
-    --debug_split 20221010_3-10_500_batch01hand_zoom_suburb_d_6fps \
-    --debug_indices 141 142 143
-```
-
-This writes original images, rectified images, original crops, and rectified
-crops under `data/bedlam_debug/<split>/`.

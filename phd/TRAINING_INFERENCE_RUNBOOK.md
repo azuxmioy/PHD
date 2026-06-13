@@ -1,109 +1,66 @@
 # PointDiT Training and Inference Runbook
 
-This is the project-specific checklist we used for the BEDLAM image-loader
-training smoke/full run and the PointDiT inference checks on `ait-server-05`.
-Paths are the tested AIT paths; replace them for another machine.
+This runbook is a generic checklist for validating data loading, training, and
+PointDiT inference. Use local paths that match your machine; examples below use
+repository-relative paths.
 
-## 1. Server and Environment
+## 1. Environment
 
-On AIT servers, follow the shared-server rules before running code:
-
-```bash
-nvidia-smi
-```
-
-Use one free GPU for first runs:
+Install the package before running training:
 
 ```bash
-export CUDA_VISIBLE_DEVICES=5
+pip install -r requirements.txt
+pip install -e .
 ```
 
-Tested layout:
+For CUDA setups, install the PyTorch build that matches your driver first, then
+install the remaining requirements. The optional Kaolin renderer can speed up
+mesh rendering when a compatible wheel is available.
+
+## 2. Required Assets
+
+Place external assets in the default locations:
 
 ```text
-repo: /data/hohs2/repos/phd
-venv: /data/hohs2/envs/phd
-outputs: /data/hohs2/outputs
-datasets: /data/hohs2/datasets
+body_models/smpl/
++-- basicmodel_neutral_lbs_10_207_0_v1.1.0.pkl
++-- kid_template.npy
+
+checkpoints/
++-- vitpose-h-multi-coco.pth
++-- pointdit/
 ```
 
-Activate the environment:
+The SMPL model is required for training, inference visualization, and fitting.
+The ViTPose-H checkpoint is required for the frozen image backbone.
 
-```bash
-cd /data/hohs2/repos/phd
-source /data/hohs2/envs/phd/bin/activate
-```
+## 3. BEDLAM Data
 
-Install the server requirements and Kaolin renderer support:
-
-```bash
-python -m pip install -r requirements-server.txt
-
-# Kaolin wheels are tied to the Torch/CUDA build. This was tested with
-# torch 2.5.1+cu121 on ait-server-05.
-python -m pip install kaolin==0.18.0 \
-  -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.5.1_cu121.html
-```
-
-Optional WandB:
-
-```bash
-wandb login
-```
-
-For non-interactive smoke tests, disable WandB:
-
-```bash
-export WANDB_MODE=disabled
-```
-
-## 2. BEDLAM Data from MP4
-
-The preferred training loader is the raw image loader (`dataset_format=image`).
-It avoids a long H5 preprocessing pass and performs crop/rotation augmentation
-from the source image instead of from a pre-cropped image.
-
-For the MP4 workflow, use:
+The preferred training loader is the raw image loader:
 
 ```text
-phd/data/bedlam/MP4_DATA_PREP.md
-```
-
-The important inputs are:
-
-```text
-Hugging Face gated BEDLAM MP4 tar:
-  Intelligent-Systems/BEDLAM/<sequence>/mp4/<sequence>_mp4.tar
-
-Official BEDLAM SMPL training annotations:
-  all_npz_12_smpl_training.zip
-```
-
-The one-split test sequence we used:
-
-```bash
-export SPLIT=20221024_3-10_100_batch01handhair_static_highSchoolGym_30fps
-```
-
-The prepared raw-loader root should look like:
-
-```text
-BEDLAM_ROOT/
+data/bedlam/
 +-- anno_smpl/
-|   +-- 20221024_3-10_100_batch01handhair_static_highSchoolGym_30fps.npz
+|   +-- <split>.npz
 +-- images_6fps/
-    +-- 20221024_3-10_100_batch01handhair_static_highSchoolGym_30fps/png/...
+    +-- <split>/png/<frame>.png
 ```
 
-Tested full one-split root:
+Set the training config:
 
-```text
-/data/hohs2/datasets/bedlam_mp4_highschoolgym_full
+```yaml
+dataset:
+  dataset_format: 'image'
+  train_data_dir: './data/bedlam'
+  rectify_images: False
 ```
 
-## 3. Raw Image Loader Smoke Test
+For MP4-based BEDLAM preparation, see
+[data/bedlam/MP4_DATA_PREP.md](data/bedlam/MP4_DATA_PREP.md).
 
-Run this before training to verify the split is readable:
+## 4. Raw-Image Loader Smoke Test
+
+Run this once after preparing a split:
 
 ```bash
 python - <<'PY'
@@ -111,9 +68,9 @@ from types import SimpleNamespace
 import torch
 from phd.data.dataset_image import TrainDiffDatasetImage
 
-split = "20221024_3-10_100_batch01handhair_static_highSchoolGym_30fps"
+split = "<bedlam_split_name>"
 args = SimpleNamespace(
-    train_data_dir="/data/hohs2/datasets/bedlam_mp4_highschoolgym_full",
+    train_data_dir="data/bedlam",
     data_splits=[split],
     val_data_splits=[split],
     resolution=256,
@@ -131,7 +88,7 @@ for key, value in sorted(sample.items()):
 PY
 ```
 
-Expected key tensor shapes include:
+Expected tensor shapes include:
 
 ```text
 input_tensor (3, 256, 256)
@@ -140,150 +97,96 @@ heatmap (17, 64, 64)
 points (283, 3)
 ```
 
-## 4. Train One Epoch from Scratch
+## 5. Training
 
-Use one GPU first. The command below is the image-loader run we used for a
-one-split, one-epoch end-to-end test with validation/test grids and WandB.
+Start with a small run:
 
 ```bash
-cd /data/hohs2/repos/phd
-source /data/hohs2/envs/phd/bin/activate
-export CUDA_VISIBLE_DEVICES=5
-
-SPLIT=20221024_3-10_100_batch01handhair_static_highSchoolGym_30fps
-RUN=pointdit_highschoolgym_image_scratch_1ep_$(date +%Y%m%d_%H%M%S)
-
 accelerate launch --num_processes 1 phd/train.py \
-  --config phd/config/train.yaml \
-  --dataset_format image \
-  --train_data_dir /data/hohs2/datasets/bedlam_mp4_highschoolgym_full \
-  --data_splits "$SPLIT" \
-  --val_data_splits "$SPLIT" \
-  --output_dir /data/hohs2/outputs \
-  --exp_name "$RUN" \
-  --train_batch_size 8 \
-  --num_train_epochs 1 \
-  --checkpointing_steps 2194 \
-  --validation \
-  --test \
-  --validation_steps 2194 \
-  --test_steps 2194 \
-  --num_gen_images 4 \
-  --num_validation_images 4 \
-  --report_to tensorboard,wandb \
-  --wandb_project phd \
-  --wandb_run_name "$RUN"
+    --config phd/config/train.yaml \
+    --dataset_format image \
+    --train_data_dir data/bedlam \
+    --data_splits <bedlam_split_name> \
+    --val_data_splits <bedlam_split_name> \
+    --output_dir outputs \
+    --exp_name pointdit_smoke \
+    --train_batch_size 8 \
+    --num_train_epochs 1 \
+    --checkpointing_steps 1000 \
+    --validation \
+    --test \
+    --validation_steps 1000 \
+    --test_steps 1000 \
+    --report_to tensorboard
 ```
 
 Notes:
 
-- `2194` was the number of optimization steps for the tested one-split run with
-  batch size 8. If the split size or batch size changes, update
-  `checkpointing_steps`, `validation_steps`, and `test_steps` accordingly.
-- Use `--report_to tensorboard` or set `WANDB_MODE=disabled` when WandB should
-  not be used.
-- `rectify_images` defaults to `False`. Keep it off unless you are explicitly
-  testing BEDLAM camera rectification.
-- A checkpoint saved by Accelerate, for example `checkpoint-2194`, contains the
-  `transformer/` subfolder needed by inference. The final bare
-  `diffusion_pytorch_model.safetensors` file is not enough for
-  `python -m phd.inference`.
+- Use `--report_to tensorboard` for local logging, or `--report_to wandb` if
+  Weights & Biases is configured.
+- `rectify_images` defaults to `False`; enable it only when testing BEDLAM
+  camera-rectification behavior.
+- Accelerate checkpoints such as `checkpoint-1000/` contain the `transformer/`
+  subfolder needed for inference.
 
-Tested output from our run:
+## 6. PointDiT Inference
 
-```text
-/data/hohs2/outputs/pointdit_highschoolgym_image_scratch_1ep_20260612_215455/20260612-215510/checkpoint-2194
-```
-
-## 5. Inference with the Original Checkpoint
-
-The original pretrained checkpoint on AIT:
-
-```text
-/data/hohs2/checkpoints/phd/pointdit
-```
-
-The repo symlink is:
-
-```text
-checkpoints/pointdit -> /data/hohs2/checkpoints/phd/pointdit
-```
-
-Run a small prepared-folder inference:
-
-```bash
-cd /data/hohs2/repos/phd
-source /data/hohs2/envs/phd/bin/activate
-export CUDA_VISIBLE_DEVICES=5
-export WANDB_MODE=disabled
-
-python -m phd.inference \
-  --test_data_dir demo_data/single \
-  --pretrained_model_name_or_path /data/hohs2/checkpoints/phd/pointdit \
-  --output_path /data/hohs2/outputs \
-  --exp_name pointdit_inference_original_$(date +%Y%m%d_%H%M%S) \
-  --num_validation_images 4 \
-  --num_inference_steps 20 \
-  --max_images 4 \
-  --seed 123 \
-  --save_gt_mesh
-```
-
-To keep the input image fixed but condition each generated sample on a different
-random body shape, add:
-
-```bash
---random_shape_betas
-```
-
-This samples one zero-mean, unit-standard-deviation 10D SMPL beta vector per
-generated sample and uses the same beta row for the PointDiT condition and the
-SMPL/fitter reconstruction.
-
-Outputs:
-
-```text
-/data/hohs2/outputs/<exp_name>/
-+-- <id>_all.png
-+-- <id>_00.obj
-+-- <id>_01.obj
-+-- ...
-```
-
-The one-epoch scratch checkpoint is useful for testing the plumbing, but its
-pose samples look bad. Use the original checkpoint above when checking model
-quality.
-
-## 6. Inference with a Training Checkpoint
-
-Use a checkpoint directory that contains `transformer/config.json` and
-`transformer/diffusion_pytorch_model.safetensors`:
+Run inference with the released checkpoint:
 
 ```bash
 python -m phd.inference \
-  --test_data_dir demo_data/single \
-  --pretrained_model_name_or_path \
-    /data/hohs2/outputs/pointdit_highschoolgym_image_scratch_1ep_20260612_215455/20260612-215510/checkpoint-2194 \
-  --output_path /data/hohs2/outputs \
-  --exp_name pointdit_inference_scratch_$(date +%Y%m%d_%H%M%S) \
-  --num_validation_images 4 \
-  --num_inference_steps 20 \
-  --max_images 4 \
-  --seed 123
+    --test_data_dir demo_data/single \
+    --pretrained_model_name_or_path checkpoints/pointdit \
+    --output_path inference \
+    --exp_name pointdit_original \
+    --num_validation_images 4 \
+    --num_inference_steps 20 \
+    --max_images 4 \
+    --seed 123
 ```
+
+Use a newly trained Accelerate checkpoint by passing the checkpoint directory:
+
+```bash
+python -m phd.inference \
+    --test_data_dir demo_data/single \
+    --pretrained_model_name_or_path outputs/pointdit_smoke/checkpoint-1000 \
+    --output_path inference \
+    --exp_name pointdit_smoke \
+    --num_validation_images 4 \
+    --num_inference_steps 20 \
+    --max_images 4 \
+    --seed 123
+```
+
+Shape-conditioning options:
+
+```bash
+# Shared SHAPify shape:
+python -m phd.inference \
+    --test_data_dir demo_data/single \
+    --pretrained_model_name_or_path checkpoints/pointdit \
+    --output_path inference \
+    --exp_name shaped \
+    --betas_path demo_outputs/shapify/neutral_shape<subject>.npy
+
+# Random shape per generated sample:
+python -m phd.inference \
+    --test_data_dir demo_data/single \
+    --pretrained_model_name_or_path checkpoints/pointdit \
+    --output_path inference \
+    --exp_name random_shapes \
+    --random_shape_betas
+```
+
+Outputs are written to `<output_path>/<exp_name>/` and include rendered summary
+images plus sampled meshes.
 
 ## 7. Renderer Checks
 
-`Renderer(..., backend="auto")` uses Kaolin on CUDA and falls back to pyrender
-otherwise. The Kaolin path is much faster on the server, but the camera
-convention matters:
-
-- apply the same 180 degree X camera transform used by pyrender;
-- project with positive camera depth;
-- pass negative depth to Kaolin rasterization so nearer surfaces win;
-- use raw face normals after the z-buffer sign is corrected.
-
-When checking front/back orientation, render the same saved OBJ with both:
+`Renderer(..., backend="auto")` uses Kaolin on CUDA when available and falls
+back to pyrender otherwise. If rendered outputs appear flipped or blank, compare
+the same vertices with both backends:
 
 ```python
 from phd.utils.renderer import Renderer
@@ -297,6 +200,5 @@ kaolin_rgb = rgba_to_rgb(
 )
 ```
 
-The debug run that caught the z-buffer issue compared the same inference OBJ
-from image `1` across pyrender and Kaolin, then regenerated inference with the
-fixed renderer.
+The expected convention is positive camera depth for projection and the same
+camera transform across both renderers.

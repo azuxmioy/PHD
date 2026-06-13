@@ -2,21 +2,33 @@
 # Run fitting/fit_emdb.py over every sequence in the EMDB H5 bundle.
 #
 # Usage:
-#   bash scripts/eval_emdb_all.sh <config_yaml> [<h5_path> <output_dir>]
+#   bash scripts/eval_emdb_all.sh [config_yaml] <h5_path> [output_dir] [cached_h5]
 #
 # Examples:
-#   bash scripts/eval_emdb_all.sh fitting/config/eval/recommended.yaml
+#   bash scripts/eval_emdb_all.sh fitting/config/eval/recommended.yaml data/emdb_eval.h5
 #   bash scripts/eval_emdb_all.sh fitting/config/eval/causal_smooth.yaml \
-#       /data/emdb_eval.h5 results/causal_smooth/
+#       data/emdb_eval.h5 results/causal_smooth/ data/cached.h5
 #
 # After all sequences finish, compute_metrics_h5.py runs automatically and the
 # table is written to <output_dir>/metrics.txt.
 set -euo pipefail
 
-CONFIG="${1:-fitting/config/eval/recommended.yaml}"
-H5="${2:-${EMDB_H5:-/data/hohs2/datasets/emdb/emdb_eval.h5}}"
-OUT="${3:-results/$(basename "$CONFIG" .yaml)}"
-CACHED="${EMDB_CACHED:-/data/hohs2/datasets/emdb_cached/cached.h5}"
+if [ "${1:-}" != "" ] && [ "${1##*.}" != "yaml" ] && [ "${1##*.}" != "yml" ]; then
+    CONFIG="fitting/config/eval/recommended.yaml"
+    H5="$1"
+    OUT="${2:-results/$(basename "$CONFIG" .yaml)}"
+    CACHED="${3:-}"
+else
+    CONFIG="${1:-fitting/config/eval/recommended.yaml}"
+    H5="${2:-}"
+    OUT="${3:-results/$(basename "$CONFIG" .yaml)}"
+    CACHED="${4:-}"
+fi
+
+if [ -z "$H5" ]; then
+    echo "Usage: bash scripts/eval_emdb_all.sh [config_yaml] <h5_path> [output_dir] [cached_h5]" >&2
+    exit 2
+fi
 
 mkdir -p "$OUT"
 SEQUENCES=(
@@ -45,7 +57,7 @@ done
 date
 echo "=== Computing metrics ==="
 
-if [ -f "$CACHED" ]; then
+if [ -n "$CACHED" ] && [ -f "$CACHED" ]; then
     python fitting/evaluation/compare_metrics_h5.py \
         --gt "$H5" --ours_dir "$OUT" --cached "$CACHED" \
         2>&1 | tee "$OUT/metrics.txt"

@@ -12,7 +12,7 @@ per-frame overlays.
 
 Usage:
     python fitting/evaluation/smooth_emdb_h5.py \\
-        --h5 /data/hohs2/datasets/emdb/emdb_eval.h5 \\
+        --h5 data/emdb_eval.h5 \\
         --sequence P1_14_outdoor_climb \\
         --input_npz results/emdb_h5/P1_14_outdoor_climb_params.npz \\
         --output_npz results/emdb_h5_smooth/P1_14_outdoor_climb_params.npz \\

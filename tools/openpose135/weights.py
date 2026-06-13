@@ -1,8 +1,8 @@
 """Auto-download the BODY_25 / hand / face checkpoints from an HF mirror.
 
-By default this points at OPENPOSE135_HF_REPO_DEFAULT — set the env var
-OPENPOSE135_HF_REPO to override, or pass `weight_paths=` to OpenPose135Detector
-to use locally cached files.
+By default this points at the public mirror in `DEFAULT_HF_REPO`. Pass
+`repo_id=` to `resolve_weights`, `--hf_repo` to the CLI, or `weight_paths=`
+to OpenPose135Detector when using a different mirror or local files.
 
 The HF repo must contain three files at its root:
     body_pose_model_25.pth    # caffemodel2pytorch port of pose_iter_584000.caffemodel
@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-OPENPOSE135_HF_REPO_DEFAULT = "hohs/openpose135-weights"
+DEFAULT_HF_REPO = "hohs/openpose135-weights"
 
 FILES = {
     "body25": "body_pose_model_25.pth",
@@ -35,10 +35,8 @@ def resolve_weights(
 
     Skips downloads when a local file at `<cache_dir>/<filename>` already exists.
     """
-    repo_id = repo_id or os.environ.get("OPENPOSE135_HF_REPO", OPENPOSE135_HF_REPO_DEFAULT)
-    cache_dir = cache_dir or os.environ.get(
-        "OPENPOSE135_CACHE_DIR", str(Path.home() / ".cache" / "openpose135")
-    )
+    repo_id = repo_id or DEFAULT_HF_REPO
+    cache_dir = cache_dir or str(Path.home() / ".cache" / "openpose135")
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
 
     out: dict[str, str] = {}
