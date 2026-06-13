@@ -27,4 +27,5 @@ PyOpenGL
 
 joblib
 tensorboard
+wandb
 imageio

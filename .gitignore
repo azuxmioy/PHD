@@ -31,6 +31,7 @@ outputs/
 runs/
 logs/
 wandb/
+renderer_compare/
 
 # Large model weights (provide via HuggingFace)
 *.pth

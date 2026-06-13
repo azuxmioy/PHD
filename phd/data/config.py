@@ -370,11 +370,30 @@ def parse_options():
     misc_group.add_argument(
         "--report_to",
         type=str,
-        default="wandb",
+        default="tensorboard",
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
+            ' Multiple integrations can be comma-separated, for example `"tensorboard,wandb"`.'
         ),
+    )
+    misc_group.add_argument(
+        "--wandb_project",
+        type=str,
+        default=None,
+        help="Optional WandB project name. Defaults to exp_name when report_to includes wandb.",
+    )
+    misc_group.add_argument(
+        "--wandb_entity",
+        type=str,
+        default=None,
+        help="Optional WandB entity/team name.",
+    )
+    misc_group.add_argument(
+        "--wandb_run_name",
+        type=str,
+        default=None,
+        help="Optional WandB run name. Defaults to exp_name.",
     )
     misc_group.add_argument(
         "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."

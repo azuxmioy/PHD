@@ -41,11 +41,12 @@ from phd.utils.modeling import (
     resize_pos_embed,
 )
 from phd.utils.surface import SURFACE_KP
-from phd.utils.visualization import image_grid, tensor_to_np
+from phd.utils.visualization import image_grid, rgba_to_rgb, tensor_to_np
 
 check_min_version("0.24.0")
 
 LIGHT_BLUE = (0.65098039, 0.74117647, 0.85882353)
+RENDER_BACKGROUND = (0.055, 0.055, 0.065)
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 __all__ = [
@@ -238,12 +239,15 @@ def run(args: argparse.Namespace) -> None:
                 pose2rot=False,
             ).vertices[0].detach().cpu().numpy()
             formatted_images.append(
-                renderer.render_rgba(
-                    gt_vertices,
-                    render_res=(256, 256),
-                    mesh_base_color=LIGHT_BLUE,
-                    scene_bg_color=(1, 1, 1),
-                )[..., :3]
+                rgba_to_rgb(
+                    renderer.render_rgba(
+                        gt_vertices,
+                        render_res=(256, 256),
+                        mesh_base_color=LIGHT_BLUE,
+                        scene_bg_color=RENDER_BACKGROUND,
+                    ),
+                    background=RENDER_BACKGROUND,
+                )
             )
             if args.save_gt_mesh:
                 trimesh.Trimesh(vertices=gt_vertices, faces=body_model.faces, process=False).export(
@@ -268,12 +272,15 @@ def run(args: argparse.Namespace) -> None:
                 save_dir / f"{file_name}_{sample_idx:02d}.obj"
             )
             formatted_images.append(
-                renderer.render_rgba(
-                    vertices,
-                    render_res=(256, 256),
-                    mesh_base_color=LIGHT_BLUE,
-                    scene_bg_color=(1, 1, 1),
-                )[..., :3]
+                rgba_to_rgb(
+                    renderer.render_rgba(
+                        vertices,
+                        render_res=(256, 256),
+                        mesh_base_color=LIGHT_BLUE,
+                        scene_bg_color=RENDER_BACKGROUND,
+                    ),
+                    background=RENDER_BACKGROUND,
+                )
             )
 
         grid = image_grid(np.stack(formatted_images), 1, len(formatted_images))

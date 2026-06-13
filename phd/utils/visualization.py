@@ -20,9 +20,23 @@ def image_grid(imgs, rows: int, cols: int) -> Image.Image:
     h, w, _ = imgs[0].shape
     grid = Image.new("RGB", size=(cols * w, rows * h))
     for i, img in enumerate(imgs):
-        pil_img = Image.fromarray((img * 255).astype(np.uint8))
+        pil_img = Image.fromarray((np.clip(img, 0.0, 1.0) * 255).astype(np.uint8))
         grid.paste(pil_img, box=(i % cols * w, i // cols * h))
     return grid
+
+
+def rgba_to_rgb(image: np.ndarray, background=(0.05, 0.05, 0.05)) -> np.ndarray:
+    """Composite an RGB/RGBA float image onto a solid RGB background."""
+    image = np.asarray(image, dtype=np.float32)
+    if image.shape[-1] == 3:
+        return np.clip(image, 0.0, 1.0)
+    if image.shape[-1] != 4:
+        raise ValueError(f"Expected RGB/RGBA image, got shape {image.shape}")
+
+    rgb = image[..., :3]
+    alpha = image[..., 3:4]
+    background = np.asarray(background, dtype=np.float32).reshape(1, 1, 3)
+    return np.clip(rgb * alpha + background * (1.0 - alpha), 0.0, 1.0)
 
 
 def heatmap_to_vis(heatmap: torch.Tensor | None, output_size: tuple[int, int] = (256, 256)) -> np.ndarray:

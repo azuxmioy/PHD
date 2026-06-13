@@ -41,7 +41,7 @@ from phd.utils.geometry import rot6d_to_rotmat
 from phd.utils.modeling import create_backbone
 from phd.utils.renderer import Renderer
 from phd.utils.surface import SURFACE_KP
-from phd.utils.visualization import heatmap_to_vis, image_grid, tensor_to_np
+from phd.utils.visualization import heatmap_to_vis, image_grid, rgba_to_rgb, tensor_to_np
 from phd.fitter.pt.fitter import SMPLFitter
 from phd.fitter.pt.bodymodel import SMPLBodyModel
 
@@ -51,6 +51,28 @@ mean_points, std_points = load_point_statistics()
 check_min_version("0.24.0")
 
 logger = get_logger(__name__)
+
+LIGHT_BLUE = (0.650, 0.741, 0.858)
+VALIDATION_RENDER_BG = (0.055, 0.055, 0.065)
+
+
+def _normalize_report_to(report_to):
+    if isinstance(report_to, str):
+        report_to = report_to.strip()
+        if report_to.lower() in {"", "none", "null"}:
+            return None
+        if "," in report_to:
+            return [name.strip() for name in report_to.split(",") if name.strip()]
+    return report_to
+
+
+def _uses_tracker(report_to, tracker_name):
+    if report_to is None:
+        return False
+    if isinstance(report_to, str):
+        return report_to == "all" or report_to == tracker_name
+    return "all" in report_to or tracker_name in report_to
+
 
 def log_validation(logger, val_dataloader, backbone, head, dit, scheduler,
                             args, accelerator, weight_dtype, step, body_model,
@@ -109,11 +131,15 @@ def log_validation(logger, val_dataloader, backbone, head, dit, scheduler,
                               pose2rot=False
                               ).vertices[0].detach().cpu().numpy()
 
-        render_gt = renderer.render_rgba( gt_smpl_V,
+        render_gt = rgba_to_rgb(
+            renderer.render_rgba(
+                gt_smpl_V,
                 render_res=(256, 256),
-                mesh_base_color=(0.650,  0.741,  0.858),
-                scene_bg_color=(1, 1, 1)
-            )
+                mesh_base_color=LIGHT_BLUE,
+                scene_bg_color=VALIDATION_RENDER_BG,
+            ),
+            background=VALIDATION_RENDER_BG,
+        )
         
         if args.use_vertices:
             fitter = fitter.to(poses.device)
@@ -140,11 +166,13 @@ def log_validation(logger, val_dataloader, backbone, head, dit, scheduler,
                               pose2rot=False
                               ).vertices[0].detach().cpu().numpy()
             
-            render_samples.append(renderer.render_rgba( sample_smpl_V,
+            render_samples.append(rgba_to_rgb(renderer.render_rgba( sample_smpl_V,
                     render_res=(256, 256),
-                    mesh_base_color=(0.650,  0.741,  0.858),
-                    scene_bg_color=(1, 1, 1)
-                ))
+                    mesh_base_color=LIGHT_BLUE,
+                    scene_bg_color=VALIDATION_RENDER_BG,
+                ),
+                background=VALIDATION_RENDER_BG,
+            ))
 
 
         image_logs.append(
@@ -154,60 +182,56 @@ def log_validation(logger, val_dataloader, backbone, head, dit, scheduler,
             "render_gt" : render_gt, 
             "render_sample": render_samples})
 
+    formatted_images = []
+    num_samples = 0
+    for log in image_logs:
+        input_image = log["input_image"][0]
+        heatmap_image = log["heatmap"][0]
+        render_gt = log["render_gt"]
+        render_sample = log["render_sample"]
+
+        formatted_images.append(input_image)
+        formatted_images.append(heatmap_image)
+        formatted_images.append(render_gt)
+
+        for r in render_sample:
+            formatted_images.append(r)
+
+        num_samples += 1
+
+    formatted_images = np.stack(formatted_images)
+    grid = image_grid(formatted_images, num_samples, args.num_gen_images + 3)
+    grid_path = os.path.join(save_path, mode + "_%07d_output.png" % (step))
+    grid.save(grid_path)
+
     for tracker in accelerator.trackers:
         if tracker.name == "tensorboard":
-            
-            formatted_images = []
-            num_samples = 0
-            for log in image_logs:
-                input_image = log["input_image"][0]
-                heatmap_image = log["heatmap"][0]
-                render_gt = log["render_gt"][...,:3]
-                render_sample = log["render_sample"]
-                
-                formatted_images.append(input_image)
-                formatted_images.append(heatmap_image)
-                formatted_images.append(render_gt)
-
-                for r in render_sample:
-                    formatted_images.append(r[...,:3])
-
-                num_samples += 1
-
-            formatted_images = np.stack(formatted_images)
-            grid = image_grid(formatted_images, num_samples, args.num_gen_images + 3)
-            #tracker.writer.add_images('images', formatted_images, step, dataformats="NHWC")
-            tracker.writer.add_image( mode+'/images', np.asarray(grid).astype(float) / 255.0, step, dataformats="HWC")
-            grid.save(os.path.join(save_path, mode + "_%07d_output.png" % (step)))
-
-
+            tracker.writer.add_image(
+                mode + '/images',
+                np.asarray(grid).astype(float) / 255.0,
+                step,
+                dataformats="HWC",
+            )
         elif tracker.name == "wandb":
-            formatted_images = []
+            import wandb
 
-            for log in image_logs:
-                images = log["images"]
-                src_images = log["src_images"]
-                uv_images = log["uv_images"]
-                tgt_images = log["gt_images"]
-
-                formatted_images.append(wandb.Image(tgt_images[0], caption="Ground truth images"))
-                formatted_images.append(wandb.Image(uv_images[0], caption="Controlnet uv images"))
-                formatted_images.append(wandb.Image(src_images[0], caption="src_images"))
-
-                for i, image in enumerate(images):
-                    image = wandb.Image(image, caption="Generated image %d" % i)
-                    formatted_images.append(image)
-
-            tracker.log({"validation": formatted_images})
+            tracker.log(
+                {
+                    mode + "/images": wandb.Image(
+                        np.asarray(grid),
+                        caption=f"{mode} step {step}",
+                    )
+                },
+                step=step,
+            )
         else:
-            logger.warn(f"image logging not implemented for {tracker.name}")
+            logger.warning(f"image logging not implemented for {tracker.name}")
 
+    del pipeline
+    free_memory()
 
-        del pipeline
-        free_memory()
-
-        dit.to(accelerator.device)
-        return image_logs
+    dit.to(accelerator.device)
+    return image_logs
 
 
 
@@ -224,11 +248,14 @@ def main(args, args_str):
             f'{datetime.now().strftime("%Y%m%d-%H%M%S")}'
         )
 
+    report_to = _normalize_report_to(args.report_to)
+    args.report_to = report_to
+
     accelerator_project_config = ProjectConfiguration(project_dir=project_dir, logging_dir=logging_dir)
     kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=18000))
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        log_with=args.report_to,
+        log_with=report_to,
         project_config=accelerator_project_config,
         kwargs_handlers=[kwargs]
     )
@@ -426,13 +453,25 @@ def main(args, args_str):
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
         tracker_config = dict(vars(args))
+        init_kwargs = {}
+        tracker_project_name = args.exp_name
+
+        if _uses_tracker(report_to, "wandb"):
+            tracker_project_name = args.wandb_project or args.exp_name
+            wandb_kwargs = {"name": args.wandb_run_name or args.exp_name}
+            if args.wandb_entity:
+                wandb_kwargs["entity"] = args.wandb_entity
+            init_kwargs["wandb"] = wandb_kwargs
 
         # tensorboard cannot handle list types for config
-        accelerator.init_trackers(args.exp_name, config=tracker_config)
+        accelerator.init_trackers(tracker_project_name, config=tracker_config, init_kwargs=init_kwargs)
 
         for tracker in accelerator.trackers:
             if tracker.name == "wandb":
-                tracker.run.watch(dit)
+                try:
+                    tracker.run.watch(dit)
+                except Exception as exc:
+                    logger.warning(f"Could not attach WandB model watch: {exc}")
 
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
