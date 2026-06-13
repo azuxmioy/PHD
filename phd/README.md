@@ -10,4 +10,8 @@ This package owns the shape-conditioned 3D prior:
 - `fitter/`: vendored SMPL fitting backend used by the body fitting package.
 - `utils/`: shared paths/assets, model factories, keypoint mappings, image helpers, geometry, and rendering utilities.
 
+For the tested BEDLAM image-loader training and PointDiT inference commands,
+including the AIT server paths, WandB setup, and Kaolin renderer notes, see
+[`TRAINING_INFERENCE_RUNBOOK.md`](TRAINING_INFERENCE_RUNBOOK.md).
+
 Body fitting CLIs live in `fitting/`. SHAPify shape fitting lives in `shapify/`.

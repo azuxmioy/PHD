@@ -47,8 +47,8 @@ pip install -e .
 ### Python 3.12 + CUDA 12.1 (tested on ait-server-05)
 
 ```bash
-virtualenv -p python3.12 ~/envs/phd
-source ~/envs/phd/bin/activate
+virtualenv -p python3.12 /data/hohs2/envs/phd
+source /data/hohs2/envs/phd/bin/activate
 
 # 1. Install torch first (cu121 wheels):
 pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
@@ -65,6 +65,10 @@ sed -i 's/^from numpy import bool, int, float, complex, object, unicode, str, na
 # 4. Install timm + this package:
 pip install timm
 pip install -e .
+
+# 5. Optional but recommended on CUDA servers: fast Kaolin renderer.
+pip install kaolin==0.18.0 \
+  -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.5.1_cu121.html
 ```
 
 ## External assets
@@ -365,12 +369,59 @@ python -m fitting.helper.gen_vid \
 
 ## Training PointDiT
 
+For the exact BEDLAM MP4, raw image-loader, WandB, Kaolin-renderer, and
+inference workflow tested on `ait-server-05`, see
+[phd/TRAINING_INFERENCE_RUNBOOK.md](phd/TRAINING_INFERENCE_RUNBOOK.md).
+
 Edit `phd/config/train.yaml` to point `dataset.train_data_dir` at your BEDLAM root. Use `dataset_format: image` for raw `anno_smpl/` + `images_6fps/` loading, or `dataset_format: h5` for preprocessed shards. `rectify_images` is available as an opt-in BEDLAM camera-rectification experiment flag (see `phd/data/bedlam/README.md`). Then:
 
 ```bash
 accelerate config             # one-time
 bash scripts/train_pointdit.sh  # or: accelerate launch phd/train.py --config phd/config/train.yaml
 ```
+
+One-GPU one-split raw-image run, matching the server smoke/full test:
+
+```bash
+SPLIT=20221024_3-10_100_batch01handhair_static_highSchoolGym_30fps
+accelerate launch --num_processes 1 phd/train.py \
+    --config phd/config/train.yaml \
+    --dataset_format image \
+    --train_data_dir /data/hohs2/datasets/bedlam_mp4_highschoolgym_full \
+    --data_splits "$SPLIT" \
+    --val_data_splits "$SPLIT" \
+    --output_dir /data/hohs2/outputs \
+    --exp_name pointdit_highschoolgym_image_scratch_1ep \
+    --train_batch_size 8 \
+    --num_train_epochs 1 \
+    --checkpointing_steps 2194 \
+    --validation \
+    --test \
+    --validation_steps 2194 \
+    --test_steps 2194 \
+    --report_to tensorboard,wandb \
+    --wandb_project phd
+```
+
+Run PointDiT-only inference on the prepared demo folder:
+
+```bash
+python -m phd.inference \
+    --test_data_dir demo_data/single \
+    --pretrained_model_name_or_path checkpoints/pointdit \
+    --output_path /data/hohs2/outputs \
+    --exp_name pointdit_inference_original \
+    --num_validation_images 4 \
+    --num_inference_steps 20 \
+    --max_images 4 \
+    --seed 123 \
+    --save_gt_mesh
+```
+
+When using a newly trained model for inference, pass an Accelerate checkpoint
+directory such as `checkpoint-2194` that contains a `transformer/` subfolder.
+The final bare `diffusion_pytorch_model.safetensors` save is not enough for
+`phd.inference`.
 
 The paper uses a two-stage curriculum:
 
