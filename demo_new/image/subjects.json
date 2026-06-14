@@ -1,0 +1,50 @@
+[
+    {
+        "id": "demo_image",
+        "image": "1.jpg",
+        "pose": "1_keypoints.json",
+        "camera": {
+            "focal": [
+                1423.4002685546875,
+                1423.4002685546875
+            ],
+            "camera_center": [
+                713.5850219726562,
+                971.990234375
+            ],
+            "width": 1440,
+            "height": 1920
+        },
+        "height": 1.64,
+        "weight": 55,
+        "gender": "female",
+        "template": {
+            "pose_type": "T",
+            "leg_close": false
+        }
+    },
+    {
+        "id": "2",
+        "image": "2.jpg",
+        "pose": "2_keypoints.json",
+        "camera": {
+            "focal": [
+                1961.8528,
+                1969.2307
+            ],
+            "camera_center": [
+                540,
+                960
+            ],
+            "width": 1080,
+            "height": 1920
+        },
+        "height": 1.80,
+        "weight": 80,
+        "gender": "male",
+        "template": {
+            "pose_type": "I",
+            "leg_close": true
+        }
+    }
+]

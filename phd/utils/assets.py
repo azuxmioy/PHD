@@ -10,18 +10,33 @@ import torch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ASSETS_DIR = REPO_ROOT / "assets"
-DEMO_DATA_DIR = REPO_ROOT / "demo_data"
 CHECKPOINTS_DIR = REPO_ROOT / "checkpoints"
 
 MEAN_POINTS_PATH = ASSETS_DIR / "mean_points.pkl"
 SCHEDULER_FLOW_YAML = ASSETS_DIR / "scheduler_flow.yaml"
+SMPL_NEUTRAL_MODEL_FILENAME = "basicmodel_neutral_lbs_10_207_0_v1.1.0.pkl"
 
 _POINT_STATS: tuple[torch.Tensor, torch.Tensor] | None = None
 
 
-def smpl_model_path() -> str:
+def smpl_model_dir() -> Path:
     """Return the SMPL body model directory."""
-    return os.environ.get("SMPL_MODEL_PATH", str(REPO_ROOT / "body_models" / "smpl"))
+    return Path(os.environ.get("SMPL_MODEL_PATH", str(REPO_ROOT / "body_models" / "smpl")))
+
+
+def smpl_neutral_model_path(model_root: str | Path | None = None) -> Path:
+    """Return the canonical neutral SMPL model file used by the codebase."""
+    root = smpl_model_dir() if model_root is None else Path(model_root)
+    if root.suffix:
+        if root.name == SMPL_NEUTRAL_MODEL_FILENAME:
+            return root
+        root = root.parent
+    return root / SMPL_NEUTRAL_MODEL_FILENAME
+
+
+def smpl_model_path() -> str:
+    """Return the canonical neutral SMPL model file for smplx."""
+    return str(smpl_neutral_model_path())
 
 
 def smplfitter_data_root() -> str:

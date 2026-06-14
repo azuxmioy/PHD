@@ -7,7 +7,7 @@
 # Examples:
 #   bash scripts/run_pointdit_inference.sh demo_new/image demo_outputs/pointdit
 #   bash scripts/run_pointdit_inference.sh demo_new/image demo_outputs/pointdit random checkpoints/pointdit --random_shape_betas
-#   bash scripts/run_pointdit_inference.sh demo_new/image demo_outputs/pointdit shaped checkpoints/pointdit --betas_path demo_outputs/shapify/neutral_shape1.jpg.npy
+#   bash scripts/run_pointdit_inference.sh demo_new/image demo_outputs/pointdit shaped checkpoints/pointdit --betas_path demo_outputs/shapify
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

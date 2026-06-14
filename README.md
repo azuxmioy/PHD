@@ -34,10 +34,10 @@ Download these files separately and place them in the default locations:
 
 | Asset | Default path | Used by |
 |---|---|---|
-| SMPL neutral model `basicmodel_neutral_lbs_10_207_0_v1.1.0.pkl` | `body_models/smpl/` | SHAPify, PointDiT, fitting |
-| `kid_template.npy` from `smplfitter` | `body_models/smpl/` | SMPL fitting backend |
-| ViTPose-H weights `vitpose-h-multi-coco.pth` | `checkpoints/vitpose-h-multi-coco.pth` | PointDiT backbone |
-| PointDiT checkpoint | `checkpoints/pointdit/` | Inference and fitting |
+| SMPL neutral model `basicmodel_neutral_lbs_10_207_0_v1.1.0.pkl` from https://smpl.is.tue.mpg.de/download.php | `body_models/smpl/` | SHAPify, PointDiT, fitting |
+| `kid_template.npy` (SMIL) from AGORA https://agora.is.tue.mpg.de/download.php | `body_models/smpl/` | SMPL fitting backend |
+| ViTPose-H weights `vitpose-h-multi-coco.pth` from https://huggingface.co/hohs/phd_model/tree/main| `checkpoints/vitpose-h-multi-coco.pth` | PointDiT backbone |
+| PointDiT checkpoint from https://huggingface.co/hohs/phd_model/tree/main | `checkpoints/pointdit/` | Inference and fitting |
 
 Most launchers expose paths as CLI arguments. The code also has default asset
 locations under the repository root, so the common case does not require
@@ -52,8 +52,7 @@ Run single-image shape fitting:
 ```bash
 bash scripts/run_shapify.sh \
     shapify/configs/measured.yaml \
-    demo_new/image/1_subjects.json \
-    demo_new/image \
+    demo_new/image/subjects.json \
     demo_outputs/shapify
 ```
 
@@ -76,7 +75,7 @@ bash scripts/run_pointdit_inference.sh \
     demo_outputs/pointdit \
     shaped_samples \
     checkpoints/pointdit \
-    --betas_path demo_outputs/shapify/neutral_shape1.jpg.npy
+    --betas_path demo_outputs/shapify
 ```
 
 Or sample each hypothesis with a random SMPL shape:
@@ -118,17 +117,20 @@ bash scripts/run_fitting.sh video \
 | Launcher | Argument | What to change |
 |---|---|---|
 | `scripts/run_shapify.sh` | positional 2: `subjects_json` | Subject list with image, keypoint JSON, per-subject camera focal, height, weight, and gender. |
-| `scripts/run_shapify.sh` | positional 3/4: `input_dir`, `output_dir` | Input image/keypoint root and output directory for beta vectors. |
+| `scripts/run_shapify.sh` | positional 3: `output_dir` | Output directory for beta vectors. The input root is inferred from `subjects_json`. |
+| `scripts/run_shapify.sh` | `template.pose_type`, `template.leg_close` in JSON | Optional per-subject template pose override (`T` or `I`) and leg-close setting. |
 | `scripts/run_pointdit_inference.sh` | positional 1: `test_data_dir` | Raw image, raw image folder, or video folder with `rgb/`. |
-| `scripts/run_pointdit_inference.sh` | `--betas_path` | Use a specific 10-D shape vector, usually from SHAPify. |
+| `scripts/run_pointdit_inference.sh` | `--betas_path` | Use one 10-D shape file, or a SHAPify output directory with per-image shape files. |
 | `scripts/run_pointdit_inference.sh` | `--random_shape_betas` | Sample one random shape per generated hypothesis. |
 | `scripts/run_fitting.sh image` | positional 2: `input_path` | Raw image or raw image folder. |
 | `scripts/run_fitting.sh video` | positional 2: `video_root` | Direct video folder with `rgb/`, or a root with subject/sequence folders. |
+| `scripts/run_fitting.sh` | `--config` | YAML tuning profile. Defaults are `fitting/config/demo/image.yaml` and `fitting/config/demo/video.yaml`. |
 | `scripts/run_fitting.sh` | `--shape_subjects` | Override the subject-measurements JSON used by the default SHAPify shape fallback. |
 | `scripts/run_fitting.sh` | `--metadata_file`, `--metadata_dir` | Camera metadata containing `focal` or `K`; use per image/video, not as a global launch setting. |
 | `scripts/run_fitting.sh` | `--processed_dir`, `--no_processed_cache`, `--overwrite_processed_cache` | Location/control for the default crop and bbox cache. |
 | `scripts/run_fitting.sh video` | `--batch_size`, smoothing args | Chunk size and EMDB-style temporal smoothing controls. |
 | all launchers | final extra args | Passed through to the underlying Python CLI. Use `--help` on the Python module for the full list. |
+
 
 ## Detailed Docs
 
@@ -142,10 +144,10 @@ bash scripts/run_fitting.sh video \
 
 ```bibtex
 @inproceedings{ho2025phd,
-  title     = {PHD: Personalized 3D Human Body Fitting with Point Diffusion},
-  author    = {Ho, Hsuan-I and ...},
-  booktitle = {ICCV},
-  year      = {2025}
+    title={PHD: Personalized 3D Human Body Fitting with Point Diffusion},
+    author={Ho, Hsuan-I and Guo, Chen and Wu, Po-Chen and Shugurov, Ivan and Tang, Chengcheng and Mittal, Abhay and An, Sizhe and Kaufmann, Manuel and Zhang, Linguang}, 
+    booktitle={Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
+    year={2025}
 }
 ```
 

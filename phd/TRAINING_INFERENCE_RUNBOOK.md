@@ -31,7 +31,9 @@ checkpoints/
 +-- pointdit/
 ```
 
-The SMPL model is required for training, inference visualization, and fitting.
+Use `basicmodel_neutral_lbs_10_207_0_v1.1.0.pkl` for the neutral SMPL model.
+The older `SMPL_NEUTRAL.pkl` asset is not used as a replacement here. The SMPL
+model is required for training, inference visualization, and fitting.
 The ViTPose-H checkpoint is required for the frozen image backbone.
 
 ## 3. BEDLAM Data
@@ -162,13 +164,13 @@ python -m phd.inference \
 Shape-conditioning options:
 
 ```bash
-# Shared SHAPify shape:
+# Per-image SHAPify shapes from the output directory:
 python -m phd.inference \
     --test_data_dir demo_new/image \
     --pretrained_model_name_or_path checkpoints/pointdit \
     --output_path inference \
     --exp_name shaped \
-    --betas_path demo_outputs/shapify/neutral_shape<subject>.npy
+    --betas_path demo_outputs/shapify
 
 # Random shape per generated sample:
 python -m phd.inference \

@@ -72,6 +72,7 @@ def _load_openpose(path: str) -> np.ndarray:
 def _prepare_template_data(body_model, device, betas, pose_type="T", leg_close=False):
     body_pose_t = torch.zeros((1, 69), device=device)
 
+    pose_type = str(pose_type).upper()
     if pose_type == "I":
         body_pose_t[:, 45:51] = torch.tensor([-0.13, 0, -1.48, -0.13, 0, 1.48], device=device)
 
@@ -84,6 +85,41 @@ def _prepare_template_data(body_model, device, betas, pose_type="T", leg_close=F
     shoulder_width = ((smpl_outputs.joints[0, 16, :] - smpl_outputs.joints[0, 17, :]) ** 2).sum(dim=-1).sqrt()
     template_pose = torch.cat([orient_cam, body_pose_t], dim=-1)
     return smpl_outputs.vertices[0], smpl_outputs.joints[0, 0, :], shoulder_width, template_pose
+
+
+def _bool_value(value, *, label):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y"}:
+            return True
+        if lowered in {"false", "0", "no", "n"}:
+            return False
+    raise ValueError(f"{label} must be a boolean.")
+
+
+def _subject_template(subject: dict, defaults: dict, *, label: str) -> dict:
+    template = dict(defaults or {})
+    subject_template = subject.get("template")
+    if isinstance(subject_template, dict):
+        template.update({k: v for k, v in subject_template.items() if v is not None})
+
+    if subject.get("pose_type") is not None:
+        template["pose_type"] = subject["pose_type"]
+    if subject.get("template_type") is not None:
+        template["pose_type"] = subject["template_type"]
+    if subject.get("leg_close") is not None:
+        template["leg_close"] = subject["leg_close"]
+
+    pose_type = str(template.get("pose_type", "T")).upper()
+    if pose_type not in {"T", "I"}:
+        raise ValueError(f"{label} template pose_type must be 'T' or 'I', got {pose_type!r}.")
+
+    return {
+        "pose_type": pose_type,
+        "leg_close": _bool_value(template.get("leg_close", False), label=f"{label} template leg_close"),
+    }
 
 
 def fit_measured_betas(
@@ -216,6 +252,7 @@ def run(config: dict) -> None:
         image_path = os.path.join(input_dir, image_name)
         output_name = os.path.basename(image_name)
         camera = subject_camera(subject, image_path, camera_defaults, label=image_name)
+        template = _subject_template(subject, config.get("template", {}), label=image_name)
         pose = _load_openpose(os.path.join(input_dir, pose_name))
 
         pelvis = pose[8, :2]
@@ -229,8 +266,8 @@ def run(config: dict) -> None:
             body_model,
             device,
             init_betas,
-            config["template"]["pose_type"],
-            config["template"]["leg_close"],
+            template["pose_type"],
+            template["leg_close"],
         )
         offset_z = smpl_shoulder * fx / shoulder_width
         cam_init = torch.tensor([offset_x * offset_z, offset_y * offset_z, offset_z], device=device).unsqueeze(0).float()

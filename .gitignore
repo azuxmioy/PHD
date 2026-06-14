@@ -46,16 +46,10 @@ body_models/
 smpl_models/
 !body_models/.gitkeep
 
-# Local experiment dumps (top-level only — don't exclude demo_data/single/)
+# Local experiment dumps (top-level only)
 /single/
 eval_results.txt
 
-# Backup copies of the experimental source (kept locally, not for the public repo)
-PoseDiT-pc/
-release_code/
+.claude/
+demo_outputs/
 
-# Local test assets / outputs for shapify-video verification
-mesh/
-hf_space/
-openpose135_pth/
-shapify_video_test_results/

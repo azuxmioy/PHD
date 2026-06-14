@@ -20,8 +20,7 @@ per-image focal length, and height/weight measurements.
 ```bash
 bash scripts/run_shapify.sh \
     shapify/configs/measured.yaml \
-    demo_new/image/1_subjects.json \
-    demo_new/image \
+    demo_new/image/subjects.json \
     demo_outputs/shapify
 ```
 
@@ -35,7 +34,11 @@ The subject JSON is a list of entries:
     "camera": {"focal": 1436.0},
     "height": 1.77,
     "weight": 60,
-    "gender": "male"
+    "gender": "male",
+    "template": {
+      "pose_type": "T",
+      "leg_close": false
+    }
   }
 ]
 ```
@@ -47,6 +50,11 @@ dimensions are inferred from the image unless you set `image_width` and
 `image_height`, or include them in `camera`. The script writes
 `neutral_shape<image>.npy`, `pred_shape<image>.obj`, `opt_mesh_<image>.obj`,
 and an overlay image to `--output_dir`.
+
+`template.pose_type` can be `"T"` or `"I"`, and `template.leg_close` controls
+whether the template closes the legs before fitting. The YAML `template` block
+is only the default; each subject can override it. Shorthand top-level
+`pose_type`, `template_type`, and `leg_close` fields are also accepted.
 
 ## Video Shape Fitting
 
@@ -101,6 +109,7 @@ The multi-view formulation is described in [VIDEO_FITTING.md](VIDEO_FITTING.md).
 | `--output_dir` | both | Directory for beta vectors, meshes, and overlays. |
 | `focal` in JSON | both | Required focal length paired with each subject/image. |
 | `height`, `weight` in JSON | both | Measurement anchors for metric scale and body mass. |
+| `template.pose_type`, `template.leg_close` in JSON | `fit_shape.py` | Per-subject template pose defaults/overrides for single-image SHAPify. |
 | `--n_frames` | `fit_shape_video.py` | Number of frames sampled per subject. |
 | `--pretrained_model_name_or_path` | `fit_shape_video.py` | PointDiT checkpoint used for frame initialization. |
 | `--openpose_weights_dir` in config | `fit_shape_video.py` | Local OpenPose-135 weight directory, if auto-download is not desired. |

@@ -51,8 +51,12 @@ bash scripts/run_pointdit_inference.sh \
     demo_outputs/pointdit \
     shaped_samples \
     checkpoints/pointdit \
-    --betas_path demo_outputs/shapify/neutral_shape<subject>.npy
+    --betas_path demo_outputs/shapify
 ```
+
+When `--test_data_dir` is a folder, `--betas_path` may point to a SHAPify
+output directory. In that case inference loads the matching
+`neutral_shape<image>.npy` for each image.
 
 To test the point prior across random body shapes while keeping the input image
 fixed:
@@ -132,7 +136,7 @@ Set `global.pretrained_model_name_or_path` in the YAML, or pass
 | Argument | Script | Meaning |
 |---|---|---|
 | `--test_data_dir` | `inference.py` | Raw image, raw image folder, video folder with `rgb/`, or legacy test-data root. |
-| `--betas_path` | `inference.py` | Shared 10-D beta vector, usually from SHAPify. |
+| `--betas_path` | `inference.py` | Shared 10-D beta vector, or directory of per-image SHAPify beta vectors. |
 | `--random_shape_betas` | `inference.py` | Sample independent random betas per generated sample. |
 | `--processed_dir`, `--no_processed_cache` | `inference.py` | Control the generated crop/bbox cache. |
 | `--num_validation_images` | `inference.py` | Number of samples per input image. |

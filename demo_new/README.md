@@ -10,15 +10,15 @@ of the required input layout.
 demo_new/image/
 +-- 1.jpg
 +-- 1_keypoints.json
-+-- 1_subjects.json
 +-- 2.jpg
 +-- 2_keypoints.json
-+-- 2_subjects.json
++-- subjects.json
 ```
 
-Each `*_subjects.json` stores the image file, OpenPose file, camera intrinsics,
-height, weight, and gender. Fitting uses it to run SHAPify first, then loads the
-resulting shape:
+`subjects.json` stores one entry per image with its image file, OpenPose file,
+camera intrinsics, height, weight, gender, and optional per-subject SHAPify
+template settings. Fitting uses it to run SHAPify for each image first, then
+loads the resulting shape:
 
 ```bash
 bash scripts/run_fitting.sh image \
@@ -27,13 +27,12 @@ bash scripts/run_fitting.sh image \
     checkpoints/pointdit
 ```
 
-To run SHAPify directly for one image:
+To run SHAPify directly for all listed image subjects:
 
 ```bash
 bash scripts/run_shapify.sh \
     shapify/configs/measured.yaml \
-    demo_new/image/1_subjects.json \
-    demo_new/image \
+    demo_new/image/subjects.json \
     demo_outputs/shapify
 ```
 

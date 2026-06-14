@@ -20,6 +20,16 @@ keypoints. It owns the image/video demo fitters and the EMDB benchmark runner.
 All fitting entry points accept `--config <yaml>`. YAML sections named `fit`,
 `pipeline`, `loss`, and `optimizer` set defaults; CLI flags override YAML.
 
+Demo fitting profiles live in:
+
+```text
+fitting/config/demo/image.yaml
+fitting/config/demo/video.yaml
+```
+
+`scripts/run_fitting.sh` loads these by default. Pass `--config path/to/file.yaml`
+as an extra argument to tune from a copied profile.
+
 ## Input Layouts
 
 The public demo path uses raw images/videos plus lightweight sidecar metadata.
@@ -33,7 +43,7 @@ Image folder:
 images/
 +-- <id>.jpg
 +-- <id>_keypoints.json       # optional OpenPose sidecar; otherwise detector runs
-+-- <id>_subjects.json        # measurement/camera JSON for default SHAPify shape
++-- subjects.json             # measurement/camera entries for default SHAPify shapes
 +-- <id>.json                 # optional camera metadata sidecar
 +-- metadata.json             # optional shared camera metadata
 ```
@@ -84,7 +94,8 @@ Fit a raw image or a folder of raw images:
 bash scripts/run_fitting.sh image \
     path/to/image_or_folder \
     demo_outputs/fitting \
-    checkpoints/pointdit
+    checkpoints/pointdit \
+    --config fitting/config/demo/image.yaml
 ```
 
 Equivalent Python command:
@@ -106,7 +117,7 @@ For raw images, `fit_image.py` runs the bundled PyTorch OpenPose-135 detector,
 estimates a bbox, and builds the crop in memory. If `<image>_keypoints.json` is
 next to the image, or `--keypoints_dir` points to matching OpenPose JSONs, the
 detector is skipped. Unless `--betas_path` is provided, fitting runs SHAPify
-from the matching `<image>_subjects.json` and uses that personalized shape.
+from `subjects.json` and uses the entry matching the image name.
 
 For raw inputs, bbox/crop preparation follows the public demo preprocessing
 convention: BODY_25 keypoints above `--openpose_bbox_keypoint_thresh` define a
@@ -153,7 +164,8 @@ Run fitting:
 bash scripts/run_fitting.sh video \
     path/to/video \
     video_fit \
-    checkpoints/pointdit
+    checkpoints/pointdit \
+    --config fitting/config/demo/video.yaml
 ```
 
 Or call Python directly:
@@ -333,7 +345,7 @@ avoid auto-download.
 | `--openpose_bbox_scale`, `--openpose_bbox_keypoint_thresh` | `fit_image.py`, `fit_video.py` | Raw input bbox expansion and BODY_25 confidence threshold. |
 | `--batch_size`, `--smooth_intra`, `--smooth_causal`, `--w_jitter` | `fit_video.py`, `fit_emdb.py` | Batched fitting and EMDB-style temporal smoothing controls. |
 | `--pretrained_model_name_or_path` | all fitters | PointDiT checkpoint directory. |
-| `--config` | all fitters | YAML profile for fit, pipeline, loss, and optimizer defaults. |
+| `--config` | all fitters | YAML profile for fit, pipeline, loss, and optimizer defaults. Demo profiles are under `fitting/config/demo/`. |
 | `--n_sample` | all fitters | PointDiT samples per input frame. |
 | `--n_iter` | all fitters | Optimizer iterations per fit. |
 | `--lr_pose`, `--lr_cam`, `--lr_orient` | all fitters | Adam learning rates for SMPL/camera parameters. |

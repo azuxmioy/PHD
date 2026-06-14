@@ -16,6 +16,10 @@
         },
         "height": 1.77,
         "weight": 60,
-        "gender": "male"
+        "gender": "male",
+        "template": {
+            "pose_type": "T",
+            "leg_close": false
+        }
     }
 ]

@@ -121,6 +121,33 @@ def _load_beta_vector(path: Path) -> np.ndarray:
     return np.asarray(betas).reshape(-1)[:10].astype(np.float32)
 
 
+def _beta_file_candidates(root: Path, stem: str, image_name: str | None = None) -> list[Path]:
+    candidates = []
+    if image_name:
+        candidates.append(root / f"neutral_shape{image_name}.npy")
+    candidates.extend([
+        root / f"neutral_shape{stem}.npy",
+        root / f"{stem}_betas.npy",
+        root / f"{stem}.npy",
+        root / f"{stem}.pkl",
+    ])
+    return candidates
+
+
+def _load_betas_from_path(betas_path: Path, stem: str, image_name: str | None = None) -> np.ndarray:
+    if betas_path.is_dir():
+        candidates = _beta_file_candidates(betas_path, stem, image_name=image_name)
+        for candidate in candidates:
+            if candidate.exists():
+                return _load_beta_vector(candidate)
+        expected = ", ".join(str(candidate.name) for candidate in candidates)
+        raise FileNotFoundError(
+            f"No beta file found for {image_name or stem} in {betas_path}. "
+            f"Expected one of: {expected}"
+        )
+    return _load_beta_vector(betas_path)
+
+
 class PreparedCropDataset:
     """Legacy prepared-folder dataset for PointDiT-only inference."""
 
@@ -148,11 +175,11 @@ class PreparedCropDataset:
         return {
             "input_tensor": IMAGE_TRANSFORM(image),
             "img_tensor": torch.from_numpy(image_np).permute(2, 0, 1),
-            "cond_betas": torch.from_numpy(self._load_betas(image_path.stem)).float(),
+            "cond_betas": torch.from_numpy(self._load_betas(image_path.stem, image_path.name)).float(),
             "file_name": image_path.stem,
         }
 
-    def _load_betas(self, stem: str) -> np.ndarray:
+    def _load_betas(self, stem: str, image_name: str | None = None) -> np.ndarray:
         params_path = self.params_dir / f"{stem}.pkl"
         if params_path.exists():
             with open(params_path, "rb") as f:
@@ -163,7 +190,7 @@ class PreparedCropDataset:
         if self.betas_path is None:
             return np.zeros(10, dtype=np.float32)
 
-        return _load_beta_vector(self.betas_path)
+        return _load_betas_from_path(self.betas_path, stem, image_name=image_name)
 
 
 class RawImageDataset:
@@ -216,14 +243,14 @@ class RawImageDataset:
         return {
             "input_tensor": IMAGE_TRANSFORM(crop_image),
             "img_tensor": torch.from_numpy(image_np).permute(2, 0, 1),
-            "cond_betas": torch.from_numpy(self._load_betas()).float(),
+            "cond_betas": torch.from_numpy(self._load_betas(image_path)).float(),
             "file_name": image_path.stem,
         }
 
-    def _load_betas(self) -> np.ndarray:
+    def _load_betas(self, image_path: Path) -> np.ndarray:
         if self.betas_path is None:
             return np.zeros(10, dtype=np.float32)
-        return _load_beta_vector(self.betas_path)
+        return _load_betas_from_path(self.betas_path, image_path.stem, image_name=image_path.name)
 
 
 def _build_dataset(args: argparse.Namespace):
@@ -443,11 +470,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seed", type=int, default=None, help="Optional inference seed.")
     parser.add_argument("--guidance_scale", type=float, default=1.5, help="Classifier-free guidance scale.")
-    parser.add_argument("--num_validation_images", type=int, default=1, help="Number of PointDiT samples per input.")
+    parser.add_argument("--num_validation_images", type=int, default=2, help="Number of PointDiT samples per input.")
     parser.add_argument("--num_inference_steps", type=int, default=5, help="Number of denoising steps.")
     parser.add_argument("--num_workers", type=int, default=0, help="DataLoader worker count.")
     parser.add_argument("--max_images", type=int, default=None, help="Optional cap on processed examples.")
-    parser.add_argument("--betas_path", type=str, default=None, help="Optional default 10-D beta vector.")
+    parser.add_argument(
+        "--betas_path",
+        type=str,
+        default=None,
+        help=(
+            "Optional 10-D beta vector file, or a directory with per-image "
+            "neutral_shape<image>.npy files from SHAPify."
+        ),
+    )
     add_image_input_args(parser)
     parser.add_argument(
         "--random_shape_betas",

@@ -2,6 +2,8 @@
 !.gitignore
 !README.md
 !image/
-!image/*_subjects.json
+!image/subjects.json
+!image/*.jpg
+!image/*_keypoints.json
 !video/
 !video/video_subjects.json

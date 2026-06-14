@@ -7,8 +7,8 @@
 #
 # Examples:
 #   bash scripts/run_fitting.sh image demo_new/image demo_outputs/fitting checkpoints/pointdit
-#   bash scripts/run_fitting.sh image path/to/images demo_outputs/fitting checkpoints/pointdit --shape_subjects path/to/subjects.json
-#   bash scripts/run_fitting.sh video path/to/video video_fit checkpoints/pointdit --shape_subjects path/to/video_subjects.json --render
+#   bash scripts/run_fitting.sh image path/to/images demo_outputs/fitting checkpoints/pointdit --config path/to/image.yaml
+#   bash scripts/run_fitting.sh video path/to/video video_fit checkpoints/pointdit --config path/to/video.yaml --render
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -22,6 +22,7 @@ case "$MODE" in
         CHECKPOINT="${4:-checkpoints/pointdit}"
 
         python -m fitting.fit_image \
+            --config fitting/config/demo/image.yaml \
             --test_data_dir "$INPUT_PATH" \
             --output_path "$OUTPUT_DIR" \
             --exp_name image_fit \
@@ -34,6 +35,7 @@ case "$MODE" in
         CHECKPOINT="${4:-checkpoints/pointdit}"
 
         python -m fitting.fit_video \
+            --config fitting/config/demo/video.yaml \
             --test_data_dir "$VIDEO_ROOT" \
             --exp_name "$EXP_NAME" \
             --pretrained_model_name_or_path "$CHECKPOINT" \

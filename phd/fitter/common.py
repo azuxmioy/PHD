@@ -8,6 +8,8 @@ import sys
 
 import contextlib
 
+from phd.utils.assets import smpl_neutral_model_path
+
 
 def initialize(model_name, gender, model_root=None, num_betas=None):
     if model_root is None:
@@ -17,7 +19,10 @@ def initialize(model_name, gender, model_root=None, num_betas=None):
         if model_name == 'smpl':
             gender_str = dict(f='f', m='m', n='neutral')[gender[0]]
             filename = f'basicmodel_{gender_str}_lbs_10_207_0_v1.1.0.pkl'
-            with open(osp.join(model_root, filename), 'rb') as f:
+            model_path = smpl_neutral_model_path(model_root) if gender_str == 'neutral' else osp.join(model_root, filename)
+            if not osp.exists(model_path):
+                raise FileNotFoundError(f'Could not find SMPL {gender_str} model: {model_path}')
+            with open(model_path, 'rb') as f:
                 smpl_data = pickle.load(f, encoding='latin1')
         elif model_name in ('smplx', 'smplxlh', 'smplxmoyo'):
             gender_str = dict(f='FEMALE', m='MALE', n='NEUTRAL')[gender[0]]
