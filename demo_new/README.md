@@ -55,7 +55,7 @@ default shape unless `--betas_path` is explicitly provided:
 ```bash
 bash scripts/run_fitting.sh video \
     demo_new/video \
-    video_fit \
+    demo_outputs/fitting \
     checkpoints/pointdit
 ```
 

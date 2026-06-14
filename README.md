@@ -8,6 +8,47 @@ This repository contains three main components:
 - **PointDiT**: samples shape-conditioned 3D body points from a person image.
 - **Body fitting**: fits SMPL pose, camera, and mesh outputs for images, videos, and EMDB evaluation.
 
+## Author Note
+
+I finally had time to clean up and open-source this experimental codebase from
+my internship. The refactor was done with help from Claude Code and Codex. I
+tried to keep the implementation close to the original research code while
+making the repository easier to read, run, and modify.
+
+This project came from a practical need in our lab: in-the-wild body fitting for
+3D avatar reconstruction and motion capture. A traditional pipeline often looks
+like this:
+
+```text
+pose initialization (regressor) -> average shape -> optimization-based 2D keypoint fitting
+```
+
+In practice, many off-the-shelf pose estimators are trained with fixed or
+estimated focal lengths, and the recovered body shape/scale remains ambiguous.
+We wanted to ask whether fitting becomes more reliable when the camera focal
+length is known and the person's body shape is calibrated first:
+
+```text
+shape calibration -> pose initialization (regressor) -> optimization-based 2D keypoint fitting
+```
+
+The broader message of PHD is that practical 3D human pose estimation should
+care about the actual body shape and the absolute camera-frame position, not
+only pose up to scale.
+
+Some lessons and known limitations:
+
+1. The current fitting method still depends heavily on 2D keypoint detection,
+   which can be fragile under occlusion and extreme poses. The optimization path
+   is also mostly single-image or per-frame, so video smoothness requires many
+   extra tricks. I believe this should eventually be handled more directly by a
+   feed-forward image/video model.
+2. Parametric body models may already be a bottleneck for both representation
+   and benchmarking. Many existing benchmark numbers are now saturated, and the
+   remaining differences can come from system errors or from the limited
+   degrees of freedom in the model. Dense surface representations are another
+   direction worth exploring, and PointDiT is my first attempt in that direction.
+
 ## Install
 
 Create the environment, install a matching PyTorch wheel first, then install the
@@ -30,7 +71,7 @@ Download these files separately and place them in the default locations:
 |---|---|---|
 | SMPL neutral model `basicmodel_neutral_lbs_10_207_0_v1.1.0.pkl` from https://smpl.is.tue.mpg.de/download.php | `body_models/smpl/` | SHAPify, PointDiT, fitting |
 | `kid_template.npy` (SMIL) from AGORA https://agora.is.tue.mpg.de/download.php | `body_models/smpl/` | SMPL fitting backend |
-| ViTPose-H weights `vitpose-h-multi-coco.pth` from https://huggingface.co/hohs/phd_model/tree/main| `checkpoints/vitpose-h-multi-coco.pth` | PointDiT backbone |
+| ViTPose-H weights `vitpose-h-multi-coco.pth` from https://huggingface.co/hohs/phd_model/tree/main | `checkpoints/vitpose-h-multi-coco.pth` | PointDiT backbone |
 | PointDiT checkpoint from https://huggingface.co/hohs/phd_model/tree/main | `checkpoints/pointdit/` | Inference and fitting |
 
 Most launchers expose paths as CLI arguments. The code also has default asset
@@ -96,8 +137,8 @@ bash scripts/run_fitting.sh image \
 ```
 
 Fit a video folder with `rgb/` frames, optional `openpose/` keypoints, and
-camera `metadata.json`. By default, fitting runs SHAPify on the first frame and
-loads that shape for every frame:
+`video_subjects.json` metadata. By default, fitting runs SHAPify on the first
+frame and loads that shape for every frame:
 
 ```bash
 bash scripts/run_fitting.sh video \
@@ -136,7 +177,8 @@ Each sequence is written to `demo_outputs/fitting/video_fit/` as a compact
 
 - [SHAPify usage](shapify/README.md)
 - [PointDiT inference and training](phd/README.md)
-- [Image/video fitting and EMDB benchmarking](fitting/README.md)
+- [Image/video fitting](fitting/README.md)
+- [EMDB benchmarking](fitting/BENCHMARK.md)
 - [Minimal demo data layout](demo_new/README.md)
 - [BEDLAM data preparation](phd/data/bedlam/README.md)
 

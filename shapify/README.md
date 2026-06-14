@@ -56,10 +56,11 @@ whether the template closes the legs before fitting. The YAML `template` block
 is only the default; each subject can override it. Shorthand top-level
 `pose_type`, `template_type`, and `leg_close` fields are also accepted.
 
-## Video Shape Fitting
+## Video Shape Fitting (Experimental)
 
 Use this when the subject is static but not in a T-pose, and the camera moves
-around them.
+around them. This path is less exercised than the single-image SHAPify demo, so
+treat it as a research utility rather than the default public workflow.
 
 ```bash
 python -m shapify.fit_shape_video \
@@ -115,32 +116,3 @@ The multi-view formulation is described in [VIDEO_FITTING.md](VIDEO_FITTING.md).
 | `--openpose_weights_dir` in config | `fit_shape_video.py` | Local OpenPose-135 weight directory, if auto-download is not desired. |
 | `loss.*` in YAML | both | Measurement and regularization weights. |
 | `optimizer.*` in YAML | both | Learning rates and iteration counts. |
-
-## Using SHAPify Betas
-
-For PointDiT-only samples:
-
-```bash
-bash scripts/run_pointdit_inference.sh \
-    demo_new/image \
-    demo_outputs/pointdit \
-    shaped_samples \
-    checkpoints/pointdit \
-    --betas_path demo_outputs/shapify/neutral_shape<subject>.npy
-```
-
-For single-image fitting:
-
-```bash
-bash scripts/run_fitting.sh image \
-    path/to/image_or_folder \
-    demo_outputs/fitting \
-    checkpoints/pointdit \
-    --betas_path demo_outputs/shapify/neutral_shape<subject>.npy
-```
-
-For video fitting, omit `--betas_path` to use the default first-frame SHAPify
-fallback, or pass a beta file explicitly with `--betas_path`.
-
-PointDiT training/inference code lives in `phd/`; body fitting and EMDB
-evaluation live in `fitting/`.

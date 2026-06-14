@@ -147,11 +147,8 @@ Set `global.pretrained_model_name_or_path` in the YAML, or pass
 | `--output_dir`, `--exp_name` | `train.py` | Checkpoint/log output location. |
 | `--report_to` | `train.py` | Logging backend, for example `tensorboard` or `wandb`. |
 
-## More Training Notes
+## Related Docs
 
-The generic training/inference runbook is
-[TRAINING_INFERENCE_RUNBOOK.md](TRAINING_INFERENCE_RUNBOOK.md). It covers smoke
-tests, checkpoint layout, and renderer checks without machine-specific paths.
-
-Body fitting CLIs live in `fitting/`. SHAPify shape fitting lives in
-`shapify/`.
+- Body fitting CLIs live in [fitting/](../fitting/README.md).
+- EMDB benchmark instructions live in [fitting/BENCHMARK.md](../fitting/BENCHMARK.md).
+- SHAPify shape fitting lives in [shapify/](../shapify/README.md).
