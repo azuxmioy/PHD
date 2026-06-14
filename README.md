@@ -73,10 +73,20 @@ Download these files separately and place them in the default locations:
 | `kid_template.npy` (SMIL) from AGORA https://agora.is.tue.mpg.de/download.php | `body_models/smpl/` | SMPL fitting backend |
 | ViTPose-H weights `vitpose-h-multi-coco.pth` from https://huggingface.co/hohs/phd_model/tree/main | `checkpoints/vitpose-h-multi-coco.pth` | PointDiT backbone |
 | PointDiT checkpoint from https://huggingface.co/hohs/phd_model/tree/main | `checkpoints/pointdit/` | Inference and fitting |
+| Demo video data `demo_video.zip` from https://huggingface.co/hohs/phd_model/tree/main | `demo_new/video/` after unzip | Video fitting demo |
 
 Most launchers expose paths as CLI arguments. The code also has default asset
 locations under the repository root, so the common case does not require
 setting environment variables before running demos.
+
+The video demo data is packaged separately to keep the GitHub repository light:
+
+```bash
+curl -L -o demo_video.zip https://huggingface.co/hohs/phd_model/resolve/main/demo_video.zip
+unzip demo_video.zip -d .
+```
+
+The archive expands to `demo_new/video/`.
 
 ## Demo Launchers
 
@@ -138,7 +148,9 @@ bash scripts/run_fitting.sh image \
 
 Fit a video folder with `rgb/` frames, optional `openpose/` keypoints, and
 `video_subjects.json` metadata. By default, fitting runs SHAPify on the first
-frame and loads that shape for every frame:
+frame and loads that shape for every frame. If `demo_new/video/` is missing,
+download `demo_video.zip` from the Hugging Face repo listed above and unzip it
+from the repository root.
 
 ```bash
 bash scripts/run_fitting.sh video \

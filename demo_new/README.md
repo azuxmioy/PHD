@@ -38,6 +38,16 @@ bash scripts/run_shapify.sh \
 
 ## Video
 
+The video demo is distributed separately as `demo_video.zip` in the same
+Hugging Face repo as the PHD checkpoints:
+
+```bash
+curl -L -o demo_video.zip https://huggingface.co/hohs/phd_model/resolve/main/demo_video.zip
+unzip demo_video.zip -d .
+```
+
+After unzipping from the repository root, the layout should be:
+
 ```text
 demo_new/video/
 +-- rgb/
