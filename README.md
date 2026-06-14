@@ -10,21 +10,14 @@ This repository contains three main components:
 
 ## Install
 
-Create the environment and install the package:
+Create the environment, install a matching PyTorch wheel first, then install the
+package. The pinned example below targets CUDA 12.1; adjust for your driver.
 
 ```bash
-conda create -n phd python=3.8 -y
+conda create -n phd python=3.12 -y
 conda activate phd
+pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
-pip install -e .
-```
-
-For newer CUDA/Python stacks, install a matching PyTorch wheel first, then use
-the relaxed server requirements:
-
-```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-pip install -r requirements-server.txt
 pip install -e .
 ```
 

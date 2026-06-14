@@ -1,33 +1,31 @@
-# Core
-torch>=2.0,<2.5
-torchvision
-numpy==1.23.1
-scipy==1.10.1
-opencv-python==4.10.0.84
-Pillow==9.4.0
-matplotlib==3.7.5
-h5py==3.11.0
-PyYAML==6.0.2
-tqdm==4.67.1
+# Relaxed requirements for Python 3.12 + CUDA 12.1.
+# Pin only where we know the version matters (rectified-flow scheduler in diffusers 0.32+).
+# Install torch separately first:
+#   pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+
+numpy<2.0
+scipy
+opencv-python
+Pillow
+matplotlib
+h5py
+PyYAML
+tqdm
 trimesh
 
-# Diffusion / model loading
-diffusers==0.32.1
-huggingface-hub==0.26.5
-safetensors==0.4.5
-transformers
+diffusers>=0.32,<0.34
+huggingface-hub
+safetensors
+transformers<5.0
 accelerate
 
-# SMPL body model
 smplx==0.1.28
-chumpy==0.70
+chumpy @ git+https://github.com/mattloper/chumpy
 
-# Rendering
-pyrender==0.1.45
-PyOpenGL==3.1.0
+pyrender
+PyOpenGL
 
-# Misc
-joblib==1.4.2
-tensorboard==2.14.0
+joblib
+tensorboard
 wandb
-imageio==2.35.1
+imageio

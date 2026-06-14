@@ -6,16 +6,17 @@ repository-relative paths.
 
 ## 1. Environment
 
-Install the package before running training:
+Install the package before running training. Install a PyTorch build that
+matches your driver first, then the remaining requirements:
 
 ```bash
+pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
 pip install -e .
 ```
 
-For CUDA setups, install the PyTorch build that matches your driver first, then
-install the remaining requirements. The optional Kaolin renderer can speed up
-mesh rendering when a compatible wheel is available.
+The optional Kaolin renderer can speed up mesh rendering when a compatible wheel
+is available.
 
 ## 2. Required Assets
 
