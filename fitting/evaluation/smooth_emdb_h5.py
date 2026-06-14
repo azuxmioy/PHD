@@ -37,7 +37,7 @@ from phd.utils.geometry import (
     perspective_projection,
 )
 
-# Loss weights (match fitting/helper/smoother.py)
+# Loss weights (match fitting/helper/global_smooth.py)
 W_REG = 5.0
 W_SMOOTH = 20.0
 W_KP2D = 5.0

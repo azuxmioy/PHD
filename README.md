@@ -108,9 +108,12 @@ loads that shape for every frame:
 ```bash
 bash scripts/run_fitting.sh video \
     demo_new/video \
-    video_fit \
+    demo_outputs/fitting \
     checkpoints/pointdit
 ```
+
+Each sequence is written to `demo_outputs/fitting/video_fit/` as a compact
+`fit_results.npz` plus a `fit.mp4` overlay video.
 
 ## Important Arguments
 
@@ -124,7 +127,10 @@ bash scripts/run_fitting.sh video \
 | `scripts/run_pointdit_inference.sh` | `--random_shape_betas` | Sample one random shape per generated hypothesis. |
 | `scripts/run_fitting.sh image` | positional 2: `input_path` | Raw image or raw image folder. |
 | `scripts/run_fitting.sh video` | positional 2: `video_root` | Direct video folder with `rgb/`, or a root with subject/sequence folders. |
+| `scripts/run_fitting.sh` | positional 3: `output_dir` | Output root for results (default `demo_outputs/fitting`). Video results and the crop cache live here, not in the input folder. |
 | `scripts/run_fitting.sh` | `--config` | YAML tuning profile. Defaults are `fitting/config/demo/image.yaml` and `fitting/config/demo/video.yaml`. |
+| `scripts/run_fitting.sh video` | `--render`, `--fps` | Write the `fit.mp4` overlay video (on by default in the launcher) at the given frame rate. |
+| `scripts/run_fitting.sh video` | `--global_smooth`, `--global_smooth_iters` | Run a sequence-level LBFGS temporal smoother after fitting and before rendering. |
 | `scripts/run_fitting.sh` | `--shape_subjects` | Override the subject-measurements JSON used by the default SHAPify shape fallback. |
 | `scripts/run_fitting.sh` | `--metadata_file`, `--metadata_dir` | Camera metadata containing `focal` or `K`; use per image/video, not as a global launch setting. |
 | `scripts/run_fitting.sh` | `--processed_dir`, `--no_processed_cache`, `--overwrite_processed_cache` | Location/control for the default crop and bbox cache. |

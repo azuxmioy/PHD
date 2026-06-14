@@ -8,18 +8,21 @@
                 1425.2933349609375
             ],
             "camera_center": [
-                712.7262573242188,
-                971.6263427734375
+                720,
+                960
             ],
             "width": 1440,
             "height": 1920
         },
         "height": 1.77,
-        "weight": 60,
+        "weight": 63,
         "gender": "male",
         "template": {
             "pose_type": "T",
             "leg_close": false
-        }
+        },
+        "skip_frames": [
+            "126-130"
+        ]
     }
 ]

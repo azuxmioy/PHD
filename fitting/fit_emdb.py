@@ -115,29 +115,20 @@ def main():
                              'Reproduces the cached run\'s setup; slower but matches paper.')
     parser.add_argument('--smooth_intra', action='store_true',
                         help='Add intra-batch temporal smoothness (penalize differences '
-                             'between consecutive frames in the same batch). Use with '
-                             'large batch_size (e.g. 256) and n_sample=1.')
-    parser.add_argument('--smooth_intra_weight', type=float, default=10.0,
-                        help='Multiplier on intra-batch smoothness term.')
+                             'between consecutive frames in the same batch, weighted by '
+                             '--w_smooth). Use with large batch_size (e.g. 256) and n_sample=1.')
     parser.add_argument('--smooth_causal', action='store_true',
                         help='Causal smoothness: detach the past frame in the consecutive '
                              '(t-1, t) difference so the smoothness gradient only flows into '
                              'frame t (past does not get pulled toward future).')
     parser.add_argument('--w_smooth', type=float, default=0.0,
-                        help='Weight on the smooth_loss term (combines prev_params smoothness '
-                             'and intra-batch smoothness if enabled).')
-    # ----- Smoother-style losses integrated into fit_batch (active when
-    # batch_size >= 3 and the corresponding weight > 0).
-    parser.add_argument('--w_jitter', type=float, default=0.0,
-                        help='Weight on 2nd-difference temporal jitter (acceleration) over '
-                             'cam/orient/pose + first-difference 3D-joint smoothness + 10x '
-                             'jitter on head/neck joints. Borrowed from fitting/helper/smoother.py.')
-    parser.add_argument('--w_reg_init', type=float, default=0.0,
-                        help='Weight on regularize-toward-init term (pose + orient deviation '
-                             'from CameraHMR init).')
+                        help='Weight on the consecutive-frame smoothness term (per-frame '
+                             'prev_params chaining or intra-batch differences). For '
+                             'sequence-level global smoothing, post-process with '
+                             'fitting.smooth_emdb instead.')
     parser.add_argument('--gmof_sigma', type=float, default=0.0,
                         help='If >0, use GMoF-robust 2D keypoint loss with this sigma (pixels). '
-                             'fitting/helper/smoother.py uses 100. 0 keeps the plain L2 norm.')
+                             'The global smoother uses 100. 0 keeps the plain L2 norm.')
     parser.add_argument('--per_frame_loss', action='store_true',
                         help='Use sum-over-batch (mean-over-joints) reduction so each frame '
                              'contributes single-frame-magnitude gradient. Closes the batched '

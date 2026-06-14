@@ -44,14 +44,13 @@ demo_new/video/
 |   +-- <frame>.jpg
 +-- openpose/
 |   +-- <frame>_keypoints.json
-+-- metadata.json
 +-- video_subjects.json
 ```
 
-`metadata.json` provides per-frame camera intrinsics. `video_subjects.json`
-stores the subject measurements for the default first-frame SHAPify shape
-fallback. Video fitting always uses the first frame to get the default shape
-unless `--betas_path` is explicitly provided:
+`video_subjects.json` stores the subject measurements and the `camera`
+intrinsics used for the whole sequence (both the first-frame SHAPify shape and
+the per-frame pose fit). Video fitting always uses the first frame to get the
+default shape unless `--betas_path` is explicitly provided:
 
 ```bash
 bash scripts/run_fitting.sh video \

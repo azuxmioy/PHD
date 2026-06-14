@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import pickle
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -98,14 +99,27 @@ def is_prepared_image_folder(root):
     return all((root / name).is_dir() for name in ("rgb", "cropped_new", "bbox", "openpose"))
 
 
+def _natural_sort_key(path):
+    # Split the filename into digit and non-digit chunks so frames sort
+    # numerically (0, 1, 2, ..., 10) instead of lexicographically (0, 1, 10, 2).
+    return [int(chunk) if chunk.isdigit() else chunk.lower()
+            for chunk in re.split(r"(\d+)", path.name)]
+
+
 def list_input_images(root, prepared):
     root = Path(root)
     if prepared or (root / "rgb").is_dir():
         image_dir = root / "rgb"
-        return sorted(p for p in image_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS and not p.name.startswith("."))
+        return sorted(
+            (p for p in image_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS and not p.name.startswith(".")),
+            key=_natural_sort_key,
+        )
     if root.is_file():
         return [root]
-    return sorted(p for p in root.iterdir() if p.suffix.lower() in IMAGE_EXTS and not p.name.startswith("."))
+    return sorted(
+        (p for p in root.iterdir() if p.suffix.lower() in IMAGE_EXTS and not p.name.startswith(".")),
+        key=_natural_sort_key,
+    )
 
 
 def create_openpose_detector(args):

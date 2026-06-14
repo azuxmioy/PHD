@@ -3,12 +3,12 @@
 #
 # Usage:
 #   bash scripts/run_fitting.sh image [input_path] [output_dir] [checkpoint] [extra args...]
-#   bash scripts/run_fitting.sh video [video_root] [exp_name] [checkpoint] [extra args...]
+#   bash scripts/run_fitting.sh video [video_root] [output_dir] [checkpoint] [extra args...]
 #
 # Examples:
 #   bash scripts/run_fitting.sh image demo_new/image demo_outputs/fitting checkpoints/pointdit
 #   bash scripts/run_fitting.sh image path/to/images demo_outputs/fitting checkpoints/pointdit --config path/to/image.yaml
-#   bash scripts/run_fitting.sh video path/to/video video_fit checkpoints/pointdit --config path/to/video.yaml --render
+#   bash scripts/run_fitting.sh video demo_new/video demo_outputs/fitting checkpoints/pointdit --config path/to/video.yaml
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -30,15 +30,17 @@ case "$MODE" in
             "${@:5}"
         ;;
     video)
-        VIDEO_ROOT="${2:?Usage: bash scripts/run_fitting.sh video <video_root> [exp_name] [checkpoint] [extra args...]}"
-        EXP_NAME="${3:-video_fit}"
+        VIDEO_ROOT="${2:?Usage: bash scripts/run_fitting.sh video <video_root> [output_dir] [checkpoint] [extra args...]}"
+        OUTPUT_DIR="${3:-demo_outputs/fitting}"
         CHECKPOINT="${4:-checkpoints/pointdit}"
 
         python -m fitting.fit_video \
             --config fitting/config/demo/video.yaml \
             --test_data_dir "$VIDEO_ROOT" \
-            --exp_name "$EXP_NAME" \
+            --output_path "$OUTPUT_DIR" \
+            --exp_name video_fit \
             --pretrained_model_name_or_path "$CHECKPOINT" \
+            --render \
             "${@:5}"
         ;;
     *)

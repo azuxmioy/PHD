@@ -49,6 +49,7 @@ smpl_models/
 # Local experiment dumps (top-level only)
 /single/
 eval_results.txt
+/fit_results.npz
 
 .claude/
 demo_outputs/

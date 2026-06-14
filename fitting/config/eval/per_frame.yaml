@@ -15,9 +15,6 @@ pipeline:
 loss:
   w_smooth: 0.0
   smooth_intra: false
-  smooth_intra_weight: 10.0
   smooth_causal: false
-  w_jitter: 0.0
-  w_reg_init: 0.0
   gmof_sigma: 0.0
   per_frame_loss: false

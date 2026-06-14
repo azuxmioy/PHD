@@ -1,5 +1,9 @@
 # Video demo fitting defaults.
 # CLI arguments override these values.
+#
+# `w_smooth` is the single weight for consecutive-frame temporal smoothness
+# (intra-batch here, since per_frame is false). For sequence-level smoothing,
+# run fit_video with --global_smooth (post-fit LBFGS) instead of in-loop terms.
 
 fit:
   batch_size: 64
@@ -17,13 +21,10 @@ pipeline:
 
 loss:
   w_kp: 10.0
-  w_smooth: 1.0
+  w_smooth: 20.0
   w_point: 100.0
   smooth_intra: true
-  smooth_intra_weight: 10.0
-  smooth_causal: true
-  w_jitter: 0.2
-  w_reg_init: 0.5
+  smooth_causal: false
   gmof_sigma: 100.0
   per_frame_loss: false
   hand_loss_weight: 0.2
@@ -35,4 +36,15 @@ loss:
 optimizer:
   lr_cam: 1.0e-3
   lr_pose: 1.0e-3
-  lr_orient: 1.0e-4
+  lr_orient: 1.0e-3
+
+# Post-fit sequence-level smoother (only runs with --global_smooth). These weight
+# the reprojection (w_kp), deviation-from-init (w_reg), and temporal smoothness
+# (w_smooth) terms, distinct from the in-loop loss.w_smooth above. head_w extra-
+# weights the head keypoints (nose/eyes/ears) so the face pose is pulled harder.
+global_smooth:
+  iters: 10
+  w_kp: 20.0
+  w_reg: 5.0
+  w_smooth: 20.0
+  head_w: 1.0

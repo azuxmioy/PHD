@@ -18,10 +18,7 @@ FIT_BATCH_YAML_SECTIONS = {
         "w_smooth",
         "w_point",
         "smooth_intra",
-        "smooth_intra_weight",
         "smooth_causal",
-        "w_jitter",
-        "w_reg_init",
         "gmof_sigma",
         "per_frame_loss",
         "hand_loss_weight",
@@ -47,7 +44,10 @@ def apply_yaml_defaults(parser, yaml_path, sections=FIT_BATCH_YAML_SECTIONS):
             continue
         for key, value in cfg[section].items():
             if key in keys:
-                flat[key] = value
+                # `keys` may be a set (yaml key == arg dest) or a dict that maps
+                # a short yaml key to a longer argparse dest.
+                dest = keys[key] if isinstance(keys, dict) else key
+                flat[dest] = value
             else:
                 print(f"[config] warning: unknown key '{section}.{key}' ignored")
 
@@ -63,14 +63,11 @@ def add_fit_batch_args(parser, defaults=None):
         "n_iter": 100,
         "n_iter_first": None,
         "per_frame": False,
-        "w_kp": 1.0,
+        "w_kp": 10.0,
         "w_smooth": 0.0,
         "w_point": 100.0,
         "smooth_intra": False,
-        "smooth_intra_weight": 10.0,
         "smooth_causal": False,
-        "w_jitter": 0.0,
-        "w_reg_init": 0.0,
         "gmof_sigma": 0.0,
         "per_frame_loss": False,
         "hand_loss_weight": 0.05,
@@ -80,7 +77,7 @@ def add_fit_batch_args(parser, defaults=None):
         "point_update_interval": 10,
         "lr_cam": 1e-3,
         "lr_pose": 1e-3,
-        "lr_orient": 1e-5,
+        "lr_orient": 1e-3,
     }
     arg_defaults.update(defaults or {})
     existing = {option for action in parser._actions for option in action.option_strings}
@@ -102,19 +99,14 @@ def add_fit_batch_args(parser, defaults=None):
     add("--w_kp", type=float, default=arg_defaults["w_kp"],
         help="Weight for the 2D keypoint reprojection term.")
     add("--w_smooth", type=float, default=arg_defaults["w_smooth"],
-        help="Weight for temporal smoothness terms.")
+        help="Weight for the consecutive-frame temporal smoothness term "
+             "(per-frame causal chaining or intra-batch differences).")
     add("--w_point", type=float, default=arg_defaults["w_point"],
         help="Weight for the PointDiT 3D point consistency term.")
     add("--smooth_intra", action="store_true", default=arg_defaults["smooth_intra"],
-        help="Penalize differences between consecutive frames in a batch.")
-    add("--smooth_intra_weight", type=float, default=arg_defaults["smooth_intra_weight"],
-        help="Multiplier on intra-batch temporal smoothness.")
+        help="Penalize differences between consecutive frames in a batch (weighted by --w_smooth).")
     add("--smooth_causal", action="store_true", default=arg_defaults["smooth_causal"],
         help="Detach the previous frame in intra-batch smoothness.")
-    add("--w_jitter", type=float, default=arg_defaults["w_jitter"],
-        help="Weight for second-difference temporal jitter.")
-    add("--w_reg_init", type=float, default=arg_defaults["w_reg_init"],
-        help="Weight for regularization toward the initial pose.")
     add("--gmof_sigma", type=float, default=arg_defaults["gmof_sigma"],
         help="If >0, use GMoF-robust keypoint residuals with this sigma in pixels.")
     add("--per_frame_loss", action="store_true", default=arg_defaults["per_frame_loss"],
@@ -346,14 +338,20 @@ def fit_batch(
                 else:
                     kp_loss = kp_loss + hand_pose_reg.mean(dim=[0, 1]) * args.hand_pose_reg_weight
 
+        # Consecutive-frame temporal smoothness, unified under a single
+        # --w_smooth weight. In per-frame mode it chains to the previous frame;
+        # in batched mode it penalizes differences between consecutive frames in
+        # the batch. Sequence-level (global) smoothing is a separate post-process
+        # (see fitting/helper/global_smooth.py and fitting/smooth_emdb.py).
+        smooth_loss = torch.zeros((), device=kp_loss.device)
+
         if prev_params is not None:
-            smooth_loss = (
+            prev_smooth = (
                 ((prev_params["camera"] - opt_cam) ** 2).sum(dim=-1).mean()
                 + ((prev_params["orient_6d"] - opt_global_orient) ** 2).sum(dim=-1).mean()
                 + ((prev_params["poses_6d"] - opt_poses) ** 2).sum(dim=-1).mean()
             )
-        else:
-            smooth_loss = torch.tensor([0], device=kp_loss.device)
+            smooth_loss = smooth_loss + args.w_smooth * prev_smooth
 
         if batch_size > 1 and args.smooth_intra:
             opt_cam_r = opt_cam.view(batch_size, n_sample, 3)
@@ -373,44 +371,7 @@ def fit_batch(
                 + ((or_curr - or_prev) ** 2).sum(dim=-1).mean()
                 + ((po_curr - po_prev) ** 2).sum(dim=-1).mean()
             )
-            smooth_loss = smooth_loss + intra_loss * args.smooth_intra_weight
-
-        if (args.w_jitter > 0 or args.w_reg_init > 0) and batch_size >= 3:
-            cam_r = opt_cam.view(batch_size, n_sample, 3)
-            orient_r = opt_global_orient.view(batch_size, n_sample, -1)
-            pose_r = opt_poses.view(batch_size, n_sample, -1)
-            joints_r = SMPL_J[:, :24].view(batch_size, n_sample, 24, 3)
-
-            if args.w_jitter > 0:
-                def jitter(x):
-                    return ((x[2:] + x[:-2] - 2 * x[1:-1]) ** 2).sum(dim=-1).mean()
-
-                pose_per_joint = opt_poses.view(batch_size, n_sample, 23, 6)
-                head_jitter = (
-                    (
-                        pose_per_joint[2:, :, [11, 14]]
-                        + pose_per_joint[:-2, :, [11, 14]]
-                        - 2 * pose_per_joint[1:-1, :, [11, 14]]
-                    ) ** 2
-                ).sum(dim=-1).mean()
-                joint_smooth = (joints_r[1:] - joints_r[:-1]).norm(dim=-1).mean()
-                jitter_loss = jitter(cam_r) + jitter(orient_r) + jitter(pose_r) + 10.0 * head_jitter + joint_smooth
-                smooth_loss = smooth_loss + args.w_jitter * jitter_loss
-
-            if args.w_reg_init > 0:
-                init_orient_6d = matrix_to_rotation_6d(
-                    init_params["global_orient"].reshape(batch_size, 3, 3)
-                ).view(batch_size, 1, 1, 6)
-                init_pose_6d = matrix_to_rotation_6d(
-                    init_params["body_pose"].reshape(batch_size, 23, 3, 3)
-                ).view(batch_size, 1, 23, 6)
-                orient_r_full = opt_global_orient.view(batch_size, n_sample, 1, 6)
-                pose_r_full = opt_poses.view(batch_size, n_sample, 23, 6)
-                reg_loss = (
-                    (orient_r_full - init_orient_6d.to(orient_r_full)).norm(dim=-1).mean()
-                    + (pose_r_full - init_pose_6d.to(pose_r_full)).norm(dim=-1).mean()
-                )
-                smooth_loss = smooth_loss + args.w_reg_init * reg_loss
+            smooth_loss = smooth_loss + args.w_smooth * intra_loss
 
         if use_point:
             fitted_points = torch.cat([smpl_V[:, SURFACE_KP], SMPL_J], dim=1).clone().detach()
@@ -470,10 +431,14 @@ def fit_batch(
         else:
             point_loss = torch.tensor([0], device=kp_loss.device)
 
-        total_loss = kp_loss * args.w_kp + smooth_loss * args.w_smooth + point_loss * args.w_point
+        # Weighted contributions, so the progress bar terms sum to total_loss
+        # (smooth_loss already includes its --w_smooth weight).
+        kp_term = kp_loss * args.w_kp
+        point_term = point_loss * args.w_point
+        total_loss = kp_term + smooth_loss + point_term
 
         pbar_desc = "Body Fitting -- "
-        pbar_desc += f"keypoint: {kp_loss.item():.3f} | Smooth: {smooth_loss.item():.3f} | Point: {point_loss.item():.3f}"
+        pbar_desc += f"keypoint: {kp_term.item():.3f} | Smooth: {smooth_loss.item():.3f} | Point: {point_term.item():.3f}"
         loop_smpl.set_description(pbar_desc)
 
         total_loss.backward()
