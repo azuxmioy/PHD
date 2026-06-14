@@ -14,8 +14,9 @@ Create the environment, install a matching PyTorch wheel first, then install the
 package. The pinned example below targets CUDA 12.1; adjust for your driver.
 
 ```bash
-conda create -n phd python=3.12 -y
-conda activate phd
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
 pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
 pip install -e .
